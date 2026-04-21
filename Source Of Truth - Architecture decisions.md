@@ -29,6 +29,41 @@ The ALB is responsible for:
 - acting as the public entry point of the application
 - routing incoming HTTP/HTTPS traffic to the backend service
 
+
+### Listener Notes:
+The ALB will use:
+- **1 HTTP listener**
+- **port 80**
+
+The listener will use:
+- **a default forward action**
+- to send incoming traffic to the backend target group
+
+This is the minimal listener configuration selected for the project at the current stage.
+
+### Health Check Notes:
+The ALB target group will use:
+- **a minimal HTTP health check**
+
+The selected health check configuration is:
+- **Protocol:** HTTP
+- **Path:** `/health`
+- **Expected response:** `200 OK`
+
+This requires the backend application to expose a dedicated health endpoint, for example:
+
+```ts
+app.get('/health', (req, res) => {
+  res.status(200).send('OK')
+})
+```
+
+This also affects the security group configuration:
+- the backend instances must allow inbound traffic from the ALB security group on the application port
+- the health check traffic will use the same allowed path through that application port
+
+This is the minimal health check configuration selected for the project at the current stage.
+
 ### CI/CD Notes:
 The project will use **GitHub Actions** for CI/CD.
 
@@ -86,11 +121,55 @@ The container registry design is:
 No dedicated ECR repository will be created for:
 - **MongoDB**
 
+
+### MongoDB Image Notes:
+The project will not use a dedicated ECR repository for MongoDB in the minimal architecture.
+
+Instead, the MongoDB container will use:
+- **the official MongoDB image**
+
+This decision was made in order to:
+- keep the architecture minimal
+- avoid maintaining a separate image repository for the database
+- avoid adding unnecessary CI/CD steps for the database container
+
+The exact MongoDB image version is still not decided.
+Version selection will be finalized later together with the rest of the project resource versions.
+
+However:
+- **`latest` will not be used**
+
 ### IAM Notes:
 The project will use:
 - **1 GitHub OIDC provider** connected to AWS
 - **1 IAM role for GitHub Actions** in order to push images to ECR and perform deployment actions
 - **1 instance profile / IAM role for the backend EC2 instances** in order to support ECR image pulls
+
+
+### Instance Access Notes:
+The project will use:
+- **SSH**
+- **EC2 key pairs**
+
+for direct access to the backend EC2 instances.
+
+SSM will not be used in this architecture.
+
+This directly affects the security group design:
+- the backend instances must allow inbound **SSH (port 22)** only from the approved administrator IP
+- the DB instance will not allow direct inbound SSH access from outside
+
+This decision also affects IAM design:
+- no SSM-specific instance access configuration is required
+
+### Backend Instance IAM Notes:
+The backend EC2 instances will use an instance profile / IAM role in the current architecture.
+
+This decision is based on the following:
+- the backend containers will pull their images from Amazon ECR
+- the backend deployment flow depends on AWS-managed container image access
+
+The backend instance IAM role is required only for the AWS access that supports this deployment design.
 
 ### Architecture Flow:
 **Client -> ALB -> Backend EC2 Targets -> Backend Containers -> MongoDB Container on dedicated DB EC2 instance**
