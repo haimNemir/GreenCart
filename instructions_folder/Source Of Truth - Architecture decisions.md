@@ -178,6 +178,31 @@ The selected instance type for the application instances is:
 MongoDB will run on:
 - **one dedicated EC2 instance**
 - separate from the application EC2 instances
+- placed in the **private subnet**
+
+### Network Design Notes:
+The subnet placement for each component was decided as follows:
+
+| Component | Subnet | Reason |
+|---|---|---|
+| ALB | Public | Must be internet-facing by design |
+| Application EC2 instances (nginx + Express) | Public | Requires direct SSH access from admin IP; less sensitive (holds no data) |
+| MongoDB EC2 instance | Private | Contains the actual application data; must be fully isolated from the internet |
+
+The application EC2 instances remain in public subnets because:
+- SSH access (port 22) is required for administration
+- Moving them to a private subnet would require a bastion host
+
+
+The MongoDB EC2 instance is placed in a private subnet because:
+- It is the most sensitive component in the architecture
+- Private subnet isolation means it is unreachable from the internet at the **network level**, regardless of security group configuration
+- This provides a second layer of defense: even a misconfigured inbound rule cannot expose the database
+
+The NAT Gateway is required because:
+- Instances in the private subnet have no direct route to the internet
+- The MongoDB EC2 needs outbound internet access to pull the official MongoDB Docker image
+- NAT Gateway allows outbound-only internet access from the private subnet
 
 ### Storage Notes:
 All EC2 instances will use:
@@ -190,8 +215,12 @@ The MongoDB EC2 instance will also use:
 The minimal AWS infrastructure for this project includes:
 - **1 VPC**
 - **1 Internet Gateway**
-- **2 public subnets** across **2 Availability Zones**
-- **1 route table**
+- **2 public subnets** across **2 Availability Zones** (ALB + application EC2 instances)
+- **1 private subnet** (MongoDB EC2 instance)
+- **1 NAT Gateway** (placed in a public subnet — enables outbound internet access from the private subnet)
+- **2 route tables:**
+  - 1 public route table: `0.0.0.0/0 → Internet Gateway`
+  - 1 private route table: `0.0.0.0/0 → NAT Gateway`
 - **1 Application Load Balancer**
 - **1 target group**
 
@@ -291,7 +320,7 @@ The project will use:
 All source code, infrastructure code, deployment logic, and automation scripts will be stored in the same repository.
 
 ### Architecture Flow:
-**Client -> ALB -> nginx Container (port 80) -> [static files served directly] OR [/api/* proxied to Express Container] -> MongoDB Container on dedicated DB EC2 instance**
+**Client -> ALB (public subnet) -> nginx Container on Application EC2 (public subnet, port 80) -> [static files served directly] OR [/api/* proxied to Express Container (internal Docker network)] -> MongoDB Container on dedicated DB EC2 instance (private subnet)**
 
 Left to decide:
 - Work tree files platform.
