@@ -10,7 +10,7 @@ To change decisions from this file, you must obtain explicit permission.
 - **Cloud Platform:** AWS
 - **Deployment Model:** Container-based architecture
 - **Load Balancer:** AWS Application Load Balancer (ALB)
-- **CI/CD:** GitHub Actions + Amazon ECR + automated deployment to AWS Linux host
+- **CI/CD:** GitHub Actions + Amazon ECR + Docker Compose-based automated deployment to AWS Linux host
 
 ### Backend Notes:
 Express is used as the backend web framework in order to:
@@ -39,14 +39,18 @@ The CI pipeline is responsible for:
 
 The CD pipeline is responsible for:
 - pushing Docker images to **Amazon ECR**
-- deploying the updated version to the AWS Linux host
+- pulling the updated images on the AWS Linux host
+- redeploying the updated containers using **Docker Compose**
 - updating the running containers automatically
+
+The selected CD approach is based on:
+- `docker compose pull`
+- `docker compose up -d`
 
 This CI/CD design was chosen in order to keep the project simple, practical, and aligned with the selected AWS-based architecture, without introducing Kubernetes.
 
 ### Architecture Flow:
 **Client -> ALB -> AWS Linux Host -> Backend Container -> MongoDB Container**
-
 
 Left to deside:
 - How many repos.
