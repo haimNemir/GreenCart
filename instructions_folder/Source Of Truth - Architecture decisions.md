@@ -1,5 +1,5 @@
 ## Important note:
-The “Source Of Truth - Architecture decisions” file is the final document that contains all the architectural decisions of this project.
+The "Source Of Truth - Architecture decisions" file is the final document that contains all the architectural decisions of this project.
 If you want to change anything in this file, you must receive explicit approval from me.
 When we change something in the overall architecture, you should document the change there—even if the change is not yet complete—so that the current state of the change is always recorded.
 
@@ -7,6 +7,7 @@ When we change something in the overall architecture, you should document the ch
 
 - **Backend:** Node.js with TypeScript and Express
 - **Frontend:** HTML and plain JavaScript (`app.js`)
+- **Frontend Server:** nginx
 - **Database:** MongoDB
 - **Infrastructure as Code:** Terraform
 - **Cloud Platform:** AWS
@@ -25,35 +26,64 @@ This is the selected Linux distribution for the project infrastructure.
 Express is used as the backend web framework in order to:
 - define API routes
 - handle HTTP requests and responses
-- serve static frontend files when required
+
+Express does **not** serve static frontend files. That responsibility belongs to the nginx container.
 
 ### Frontend Notes:
 The frontend is intentionally kept simple.
 It uses plain HTML and JavaScript without a frontend framework and without TypeScript.
 
+All API calls in the frontend JavaScript must use **relative paths** (e.g., `/api/items`) so that nginx can proxy them correctly to the backend container.
 
-### Frontend and Backend Container Notes:
-The frontend and backend will run in:
-- **one shared application container**
 
-In the current architecture:
-- the backend will expose the application logic and API
-- the frontend will be served as static files by the same application container
+### Container Architecture Notes:
+The project uses **three separate containers**, each running a single component:
 
-This means the frontend is not treated as a separate runtime component in the current project scope.
+- **Container 1 — nginx (frontend):** serves static HTML and JavaScript files, acts as the public entry point
+- **Container 2 — Node.js / Express (backend):** handles API routes and database access, not reachable directly from outside
+- **Container 3 — MongoDB (database):** runs on a dedicated EC2 instance, separate from the application EC2 instances
 
-A future bonus improvement may separate the frontend and backend into different containers.
+This design was chosen in order to comply with the project requirement that every component runs in its own container.
 
-However:
-- this is not part of the current architecture decision
-- the project architecture must be designed and implemented around a single shared application container
+The routing flow inside each application EC2 instance is:
+
+```
+ALB
+ └── nginx (port 80)
+      ├── GET /           → serves index.html directly
+      ├── GET /app.js     → serves app.js directly
+      └── GET /api/*      → proxies to Express (internal Docker network)
+                                └── Express handles the route
+                                └── Express queries MongoDB
+                                └── Express returns JSON
+```
+
+nginx is the only container that is publicly reachable. Express is only reachable from nginx over the internal Docker Compose network.
+
+CORS configuration is **not required** because all client requests go through nginx on the same origin.
+
+
+### nginx Container Notes:
+The nginx container will use:
+- **a custom nginx Dockerfile**
+- the static HTML and JavaScript files are **baked into the image at build time** using a `COPY` instruction
+
+This means the frontend image is a versioned, self-contained artifact — consistent with the CI/CD philosophy of the project.
+
+The nginx container is responsible for:
+- serving static files directly
+- proxying `/api/*` requests to the Express container
+- proxying `/health` requests to the Express container (for ALB health check purposes)
+
+The nginx container is **not** based on a volume mount of files from the host at runtime.
+
 
 ### Load Balancer Notes:
 The project includes an **AWS Application Load Balancer (ALB)** as part of the bonus architecture scope.
 
 The ALB is responsible for:
 - acting as the public entry point of the application
-- routing incoming HTTP/HTTPS traffic to the backend service
+- routing incoming HTTP/HTTPS traffic to the **nginx containers** on the backend EC2 instances
 
 
 ### Listener Notes:
@@ -76,7 +106,14 @@ The selected health check configuration is:
 - **Path:** `/health`
 - **Expected response:** `200 OK`
 
-This requires the backend application to expose a dedicated health endpoint, for example:
+The health check request flow is:
+```
+ALB → nginx (/health) → proxied to Express → 200 OK
+```
+
+This design was chosen so that the ALB confirms the full application stack is alive (nginx + Express), not just that nginx is running.
+
+This requires the Express backend to expose a dedicated health endpoint:
 
 ```ts
 app.get('/health', (req, res) => {
@@ -85,8 +122,8 @@ app.get('/health', (req, res) => {
 ```
 
 This also affects the security group configuration:
-- the backend instances must allow inbound traffic from the ALB security group on the application port
-- the health check traffic will use the same allowed path through that application port
+- the backend instances must allow inbound traffic from the ALB security group on **port 80** (nginx)
+- the Express application port is only reachable internally via the Docker Compose network and does not require an inbound security group rule from the ALB
 
 This is the minimal health check configuration selected for the project at the current stage.
 
@@ -96,10 +133,10 @@ The project will use **GitHub Actions** for CI/CD.
 The CI pipeline is responsible for:
 - installing dependencies
 - running build and validation steps
-- building Docker images
+- building **two Docker images**: the backend image and the frontend (nginx) image
 
 The CD pipeline is responsible for:
-- pushing Docker images to **Amazon ECR**
+- pushing **both Docker images** to **Amazon ECR** (one repository per image)
 - pulling the updated images on the AWS Linux host
 - redeploying the updated containers using **Docker Compose**
 - updating the running containers automatically
@@ -129,14 +166,18 @@ The validation script will verify the mandatory project behavior, including:
 No separate standalone validation implementation is planned outside this repository-based validation script and its CI/CD execution flow.
 
 ### Compute Notes:
-The backend layer will run on **two separate EC2 instances** registered as ALB targets.
+The application layer will run on **two separate EC2 instances** registered as ALB targets.
 
-The selected instance type for the backend target instances is:
+Each application EC2 instance runs:
+- the nginx container (frontend)
+- the Express container (backend)
+
+The selected instance type for the application instances is:
 - **t3.micro**
 
 MongoDB will run on:
 - **one dedicated EC2 instance**
-- separate from the backend target instances
+- separate from the application EC2 instances
 
 ### Storage Notes:
 All EC2 instances will use:
@@ -160,7 +201,8 @@ Security will be separated using:
 - **1 security group for the DB instance**
 
 The container registry design is:
-- **1 Amazon ECR repository** for the backend image only
+- **1 Amazon ECR repository** for the backend (Express) image
+- **1 Amazon ECR repository** for the frontend (nginx) image
 
 No dedicated ECR repository will be created for:
 - **MongoDB**
@@ -212,8 +254,8 @@ The seed data and initialization logic will be stored in the same Git repository
 ### IAM Notes:
 The project will use:
 - **1 GitHub OIDC provider** connected to AWS
-- **1 IAM role for GitHub Actions** in order to push images to ECR and perform deployment actions
-- **1 instance profile / IAM role for the backend EC2 instances** in order to support ECR image pulls
+- **1 IAM role for GitHub Actions** in order to push images to both ECR repositories and perform deployment actions
+- **1 instance profile / IAM role for the backend EC2 instances** in order to support ECR image pulls for both images
 
 
 ### Instance Access Notes:
@@ -221,25 +263,25 @@ The project will use:
 - **SSH**
 - **EC2 key pairs**
 
-for direct access to the backend EC2 instances.
+for direct access to the application EC2 instances.
 
 SSM will not be used in this architecture.
 
 This directly affects the security group design:
-- the backend instances must allow inbound **SSH (port 22)** only from the approved administrator IP
+- the application instances must allow inbound **SSH (port 22)** only from the approved administrator IP
 - the DB instance will not allow direct inbound SSH access from outside
 
 This decision also affects IAM design:
 - no SSM-specific instance access configuration is required
 
 ### Backend Instance IAM Notes:
-The backend EC2 instances will use an instance profile / IAM role in the current architecture.
+The application EC2 instances will use an instance profile / IAM role in the current architecture.
 
 This decision is based on the following:
-- the backend containers will pull their images from Amazon ECR
-- the backend deployment flow depends on AWS-managed container image access
+- the backend and frontend containers will pull their images from Amazon ECR
+- the deployment flow depends on AWS-managed container image access for both images
 
-The backend instance IAM role is required only for the AWS access that supports this deployment design.
+The instance IAM role is required only for the AWS access that supports this deployment design.
 
 
 ### Repository Notes:
@@ -249,9 +291,9 @@ The project will use:
 All source code, infrastructure code, deployment logic, and automation scripts will be stored in the same repository.
 
 ### Architecture Flow:
-**Client -> ALB -> Backend EC2 Targets -> Backend Containers -> MongoDB Container on dedicated DB EC2 instance**
+**Client -> ALB -> nginx Container (port 80) -> [static files served directly] OR [/api/* proxied to Express Container] -> MongoDB Container on dedicated DB EC2 instance**
 
-Left to deside:
+Left to decide:
 - Work tree files platform.
-- Proiority list of what its important to implement first in this project, and what can wait for later. 
-- Deside which version of each element or resources or library or extention in our project, So conflicts will not be exists. 
+- Priority list of what is important to implement first in this project, and what can wait for later.
+- Decide which version of each element, resource, library, or extension in our project, so that conflicts will not exist.
