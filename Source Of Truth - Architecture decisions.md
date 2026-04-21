@@ -49,9 +49,54 @@ The selected CD approach is based on:
 
 This CI/CD design was chosen in order to keep the project simple, practical, and aligned with the selected AWS-based architecture, without introducing Kubernetes.
 
+### Compute Notes:
+The backend layer will run on **two separate EC2 instances** registered as ALB targets.
+
+The selected instance type for the backend target instances is:
+- **t3.micro**
+
+MongoDB will run on:
+- **one dedicated EC2 instance**
+- separate from the backend target instances
+
+### Storage Notes:
+All EC2 instances will use:
+- **EBS root volumes**
+
+The MongoDB EC2 instance will also use:
+- **its EBS root volume** for storage in the current minimal design
+
+### AWS Infrastructure Notes:
+The minimal AWS infrastructure for this project includes:
+- **1 VPC**
+- **1 Internet Gateway**
+- **2 public subnets** across **2 Availability Zones**
+- **1 route table**
+- **1 Application Load Balancer**
+- **1 target group**
+
+Security will be separated using:
+- **1 security group for the ALB**
+- **1 security group for the backend instances**
+- **1 security group for the DB instance**
+
+The container registry design is:
+- **1 Amazon ECR repository** for the backend image only
+
+No dedicated ECR repository will be created for:
+- **MongoDB**
+
+### IAM Notes:
+The project will use:
+- **1 GitHub OIDC provider** connected to AWS
+- **1 IAM role for GitHub Actions** in order to push images to ECR and perform deployment actions
+- **1 instance profile / IAM role for the backend EC2 instances** in order to support ECR image pulls
+
 ### Architecture Flow:
-**Client -> ALB -> AWS Linux Host -> Backend Container -> MongoDB Container**
+**Client -> ALB -> Backend EC2 Targets -> Backend Containers -> MongoDB Container on dedicated DB EC2 instance**
 
 Left to deside:
 - How many repos.
 - Work tree files platform.
+- Proiority list of what its important to implement first in this project, and what can wait for later. 
+- Deside which version of each element or resources or library or extention in our project, So conflicts will not be exists. 
