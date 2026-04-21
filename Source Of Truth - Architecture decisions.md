@@ -1,5 +1,7 @@
-This file will define the architecture of the GreenCart project.
-To change decisions from this file, you must obtain explicit permission.
+## Important note:
+The “Source Of Truth - Architecture decisions” file is the final document that contains all the architectural decisions of this project.
+If you want to change anything in this file, you must receive explicit approval from me.
+When we change something in the overall architecture, you should document the change there—even if the change is not yet complete—so that the current state of the change is always recorded.
 
 ## Selected Technology Stack
 
