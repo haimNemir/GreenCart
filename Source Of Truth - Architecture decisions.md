@@ -10,7 +10,14 @@ To change decisions from this file, you must obtain explicit permission.
 - **Cloud Platform:** AWS
 - **Deployment Model:** Container-based architecture
 - **Load Balancer:** AWS Application Load Balancer (ALB)
-- **CI/CD:** GitHub Actions + Amazon ECR + Docker Compose-based automated deployment to AWS Linux host
+- **CI/CD:** GitHub Actions + Amazon ECR + Docker Compose-based automated deployment to Red Hat Enterprise Linux 9.3 hosts
+
+
+### Linux Runtime Notes:
+The project runtime environment will use:
+- **Red Hat Enterprise Linux 9.3**
+
+This is the selected Linux distribution for the project infrastructure.
 
 ### Backend Notes:
 Express is used as the backend web framework in order to:
@@ -21,6 +28,23 @@ Express is used as the backend web framework in order to:
 ### Frontend Notes:
 The frontend is intentionally kept simple.
 It uses plain HTML and JavaScript without a frontend framework and without TypeScript.
+
+
+### Frontend and Backend Container Notes:
+The frontend and backend will run in:
+- **one shared application container**
+
+In the current architecture:
+- the backend will expose the application logic and API
+- the frontend will be served as static files by the same application container
+
+This means the frontend is not treated as a separate runtime component in the current project scope.
+
+A future bonus improvement may separate the frontend and backend into different containers.
+
+However:
+- this is not part of the current architecture decision
+- the project architecture must be designed and implemented around a single shared application container
 
 ### Load Balancer Notes:
 The project includes an **AWS Application Load Balancer (ALB)** as part of the bonus architecture scope.
@@ -84,6 +108,24 @@ The selected CD approach is based on:
 
 This CI/CD design was chosen in order to keep the project simple, practical, and aligned with the selected AWS-based architecture, without introducing Kubernetes.
 
+
+### Validation Notes:
+The project will use:
+- **CI/CD-based automated validation**
+
+Validation checks will be executed through:
+- **a dedicated validation script stored in the repository**
+
+The CI/CD pipeline will use this script as the main validation entry point.
+
+The validation script will verify the mandatory project behavior, including:
+- backend health availability
+- backend access to the seeded database data
+- the required application response flow
+- the frontend behavior required by the exercise
+
+No separate standalone validation implementation is planned outside this repository-based validation script and its CI/CD execution flow.
+
 ### Compute Notes:
 The backend layer will run on **two separate EC2 instances** registered as ALB targets.
 
@@ -139,6 +181,32 @@ Version selection will be finalized later together with the rest of the project 
 However:
 - **`latest` will not be used**
 
+
+### Database Initialization Notes:
+The project will use:
+- **the official MongoDB image**
+- **a repository-managed MongoDB initialization script**
+- mapped into **`/docker-entrypoint-initdb.d`**
+
+This initialization approach is part of the mandatory project scope and will be used to create the required base dataset for:
+- apples
+- bananas
+- oranges
+- avocados
+
+This seed mechanism is selected because it keeps the architecture simple and allows the database to be initialized automatically as part of the scripted project setup.
+
+The database seed process is intended for:
+- **first-time database initialization**
+
+The startup order of the project must respect the following dependency flow:
+1. the MongoDB container starts
+2. the database initialization script is executed on first-time startup
+3. the backend starts and uses the seeded data
+4. the validation flow runs only after the application is ready
+
+The seed data and initialization logic will be stored in the same Git repository as the rest of the project source code and automation.
+
 ### IAM Notes:
 The project will use:
 - **1 GitHub OIDC provider** connected to AWS
@@ -171,11 +239,17 @@ This decision is based on the following:
 
 The backend instance IAM role is required only for the AWS access that supports this deployment design.
 
+
+### Repository Notes:
+The project will use:
+- **one Git repository**
+
+All source code, infrastructure code, deployment logic, and automation scripts will be stored in the same repository.
+
 ### Architecture Flow:
 **Client -> ALB -> Backend EC2 Targets -> Backend Containers -> MongoDB Container on dedicated DB EC2 instance**
 
 Left to deside:
-- How many repos.
 - Work tree files platform.
 - Proiority list of what its important to implement first in this project, and what can wait for later. 
 - Deside which version of each element or resources or library or extention in our project, So conflicts will not be exists. 
