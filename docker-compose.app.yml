@@ -1,0 +1,34 @@
+# This file going to be used in the EC2 instance to run the app, it will be used by
+# the CI pipeline (that connect to the EC2 instance with SSH) to run the app with 
+# the new image that the CI build (without docker-compose) pushed to the ECR.
+
+# The value of BACKEND_IMAGE, FRONTEND_IMAGE, MONGO_URL came from the CI pipeline. 
+# In this CI we will push a new image that the CI build (without docker-compose) to the ECR and after that he will connect to the EC2 application with SSH and set the value of BACKEND_IMAGE to the URL that holds the new image in the ECR. And after that he will run on the EC2 instance the docker-compose with this file and it will pull the new image from the ECR and run it. And we use the docker-compose to create a network that containe the backend and the frontend and its allows them to communicate together.
+services:
+  backend:
+    image: ${BACKEND_IMAGE:-greencart-backend:latest} # Syntax is: BACKEND_IMAGE (or = :) greencart-backend:latest (default value).
+    build: # This step is for the local development (the CI does not exist yet) as a safety net if someone will run the file localy without the immage exist in the ECR, it will build the image from the Dockerfile in the ./backend directory and use it and not fail to an error.
+      context: ./backend
+    container_name: greencart-backend
+    environment:
+      - MONGO_URL=${MONGO_URL} # MONGO_URL - looks like that: "MONGO_URL=mongodb://db-server-elastic-ip:27017" And it came from the CI pipeline, and the CI knows it because the GitHub Actions secrets that we set in the GitHub repository, And we will know the value of the IP because is a elastic IP that we defined in the AWS.
+    networks:
+      - app-net
+    restart: unless-stopped # This means that if the container stops for any reason, it will automatically restart unless it was stopped manually.
+
+  frontend:
+    image: ${FRONTEND_IMAGE:-greencart-frontend:latest}
+    build:
+      context: ./frontend
+    container_name: greencart-frontend
+    ports: # This means that the port 80 on the host machine (EC2 instance) will be forwarded to the port 80 on the container.
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - app-net
+    restart: unless-stopped
+
+networks:
+  app-net:
+    driver: bridge # This is the default network driver, it creates a private network for the containers to communicate with each other.
