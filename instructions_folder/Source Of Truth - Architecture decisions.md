@@ -136,22 +136,38 @@ This is the minimal health check configuration selected for the project at the c
 ### CI/CD Notes:
 The project will use **GitHub Actions** for CI/CD.
 
-The CI pipeline is responsible for:
-- installing dependencies
-- running build and validation steps
-- building **two Docker images**: the backend image and the frontend (nginx) image
+**Workflow file:** `.github/workflows/ci.yml`
 
-The CD pipeline is responsible for:
-- pushing **both Docker images** to **Amazon ECR** (one repository per image)
-- SSHing into **each of the two application EC2 instances** and on each:
-  - pulling the updated images: `docker compose -f docker-compose.app.yml pull`
-  - redeploying the updated containers: `docker compose -f docker-compose.app.yml up -d`
+**Triggers:**
+- `pull_request` targeting `main` — runs build + smoke tests only. No ECR push, no deploy. The OIDC role blocks AWS access from PRs by design.
+- `push` to `main` — runs the full pipeline: build → smoke tests → ECR push → rolling deploy to both EC2 instances.
+- `push` of a `v*.*.*` tag — runs build → smoke tests → ECR push with a version tag (e.g. `1.2.3`). No deploy — versioned tags are for image versioning only.
 
-The deployment must run on both application EC2 instances to keep them in sync. Deploying to only one instance would leave the other running the previous version.
+**Image tagging strategy:**
+- Every push creates an image tagged `sha-<7-char-commit-hash>` (e.g. `sha-abc1234`).
+- Tag pushes additionally create a version tag (e.g. `1.2.3`) on the same image.
 
-The CD pipeline requires the following GitHub Actions secrets:
-- **`EC2_SSH_PRIVATE_KEY`** — the private key used to SSH into both application EC2 instances
-- **`EC2_APP_IP_1`** and **`EC2_APP_IP_2`** — the Elastic IPs of the two application EC2 instances (exposed as Terraform outputs)
+**Smoke tests (run on all triggers, before any ECR push):**
+- Backend: spins up a `mongo:7.0` container and the backend container on a shared Docker network (`ci-net`). Curls `http://localhost:3000/health` in a loop until `200 OK`. MongoDB is required because the backend calls `process.exit(1)` if the connection fails — it cannot be tested in isolation.
+- Frontend: starts the frontend container and curls `http://localhost:8080/` to confirm nginx serves static files. No backend needed — the smoke test only hits `/`.
+
+**Deployment strategy — sequential rolling deploy:**
+1. Deploy to instance 1: SSH in, ECR login, `docker compose pull`, `docker compose up -d`.
+2. Wait for instance 1: SSH in and curl `http://localhost/health` in a loop (30 attempts × 5 s). Only proceeds when healthy.
+3. Deploy to instance 2: same as instance 1.
+4. Wait for instance 2: same health check loop.
+
+This ensures the ALB always has at least one healthy instance during deployment — zero downtime.
+
+**ECR URL construction:** The workflow derives the AWS account ID dynamically via `aws sts get-caller-identity` after the OIDC step. No hardcoded account ID anywhere in the workflow.
+
+**Required GitHub Actions secrets (all set automatically by `build-infra.sh`):**
+- **`EC2_SSH_PRIVATE_KEY`** — private key used to SSH into both application EC2 instances
+- **`EC2_APP_IP_1`** and **`EC2_APP_IP_2`** — Elastic IPs of the two application EC2 instances
+- **`MONGO_URL`** — MongoDB connection string (e.g. `mongodb://<private-ip>:27017`)
+- **`AWS_ROLE_ARN`** — ARN of the GitHub Actions IAM role used for OIDC authentication with AWS
+
+All five secrets are set automatically by `build-infra.sh` after `terraform apply` completes.
 
 This CI/CD design was chosen in order to keep the project simple, practical, and aligned with the selected AWS-based architecture, without introducing Kubernetes.
 
@@ -283,11 +299,10 @@ This decision was made because using a custom MongoDB image would require embedd
 
 By using the official image instead, MongoDB updates are handled simply by pulling a newer tag from Docker Hub — no rebuild, no pipeline, no extra repository. The `docker-compose.yml` and seed script are pulled directly from the project's GitHub repository onto the MongoDB EC2 host at provisioning time using `curl`.
 
-The exact MongoDB image version is still not decided.
-Version selection will be finalized later together with the rest of the project resource versions.
+The selected MongoDB image version is:
+- **`mongo:7.0`** — current LTS release
 
-However:
-- **`latest` will not be used**
+`latest` is not used. The version is pinned for deterministic, reproducible provisioning.
 
 
 ### Database Initialization Notes:
@@ -407,12 +422,160 @@ All source code, infrastructure code, deployment logic, and automation scripts w
 
 The public visibility means no authentication is required to clone the repository — this is relevant for the MongoDB EC2 `user_data` provisioning script, which downloads the required files via curl on first boot without any credentials.
 
+### AWS Region Notes:
+All resources in this project are deployed to:
+- **AWS region: `us-east-1`** (US East — N. Virginia)
+
+All Terraform provider configuration and resource deployments target this region exclusively.
+
+
+### Resource Versions Notes:
+The following versions are pinned across the entire project to ensure compatibility and avoid unexpected breakage from upstream changes:
+
+| Component | Pinned version | Notes |
+|---|---|---|
+| MongoDB | `mongo:7.0` | Current LTS — stable, long-term support |
+| Node.js (backend base image) | `node:20-alpine` | LTS ("Iron") — `alpine` keeps the image small |
+| nginx (frontend base image) | `nginx:1.26-alpine` | Current stable branch — `alpine` for size |
+| Terraform | `~> 1.9` | Recent stable, no breaking changes expected |
+| AWS Terraform provider | `~> 6.0` | Matches the Calculator project for consistency |
+
+`latest` is not used for any resource. The goal is deterministic builds: the same version runs locally, in CI, and on every EC2 instance.
+
+
+### Terraform State Backend Notes:
+The project uses **Amazon S3 + DynamoDB** as the Terraform remote state backend.
+
+| Resource | Name |
+|---|---|
+| S3 bucket | `greencart-tfstate-haimnemir` |
+| DynamoDB table | `greencart-tfstate-lock` |
+
+The S3 bucket stores the `terraform.tfstate` file. The DynamoDB table provides state locking to prevent concurrent modifications.
+
+The state backend is provisioned by the **`bootstrap/`** Terraform configuration, which is a separate Terraform workspace from the main infrastructure. It is applied once at the beginning of `build-infra.sh`, before the main infrastructure is initialized.
+
+The S3 bucket is configured with **`force_destroy = true`**, which allows Terraform to empty and delete the bucket in a single `terraform destroy` operation — required for the full teardown flow.
+
+**Destroy order (critical — must not be reversed):**
+1. Main infrastructure is destroyed first (`terraform destroy` in `terraform/`) — state is still readable from S3 at this point
+2. S3 bucket is emptied automatically via `force_destroy`
+3. Bootstrap infrastructure is destroyed (`terraform destroy` in `bootstrap/`) — S3 bucket and DynamoDB table are deleted
+
+This full teardown is intentional. The project requirement is "provision from scratch," meaning all infrastructure — including the state backend — must be destroyable and rebuildable with no manual steps.
+
+
+### Admin IP Notes:
+SSH access to the application EC2 instances is restricted to the administrator's current public IP address. This is implemented as a Terraform variable:
+
+- **Variable name:** `var.admin_cidr`
+- **Format:** CIDR notation, e.g. `1.2.3.4/32`
+
+The `build-infra.sh` script auto-detects the current public IP at run time using `curl -s ifconfig.me` and passes it directly to Terraform. No manual input is required.
+
+Home ISP IPs are dynamic and may change between sessions. Auto-detection ensures the security group always reflects the current IP without any manual action.
+
+
+### SSH Key Pair Notes:
+The EC2 key pair is created via Terraform using the `aws_key_pair` resource. This satisfies project requirement #6 (all architecture defined as IaC) because the AWS key pair resource itself is fully defined in Terraform and committed to GitHub.
+
+**Key generation — one-time manual step, run once before the first `build-infra.sh`:**
+```
+ssh-keygen -t ed25519 -f ~/.ssh/greencart-key
+```
+
+This produces:
+- `~/.ssh/greencart-key` — private key (stays on the admin machine)
+- `~/.ssh/greencart-key.pub` — public key (read by Terraform)
+
+**How Terraform uses the key:**
+- The `build-infra.sh` script reads `~/.ssh/greencart-key.pub` automatically
+- Terraform creates the `aws_key_pair` resource using the public key
+- All EC2 instances are launched with this key pair
+- The private key never enters Terraform state
+
+**Who uses the private key:**
+
+| Party | Purpose |
+|---|---|
+| Admin (you) | Direct SSH into application EC2 instances for maintenance |
+| Admin (you) | Two-hop SSH: app EC2 → MongoDB EC2 (jump host pattern) |
+| GitHub Actions | SSH into both app EC2 instances to pull images and redeploy containers |
+
+The private key is stored in exactly two places:
+1. `~/.ssh/greencart-key` — on the admin machine
+2. `EC2_SSH_PRIVATE_KEY` — as a GitHub Actions secret (set automatically by `build-infra.sh`)
+
+
+### Terraform Folder Structure Notes:
+The Terraform code is split into two separate workspaces and organized into modules:
+
+```
+GreenCart/
+├── bootstrap/               ← Terraform workspace: S3 bucket + DynamoDB (run first, once)
+│   ├── provider.tf
+│   ├── locals.tf
+│   ├── s3.tf
+│   ├── dynamodb.tf
+│   └── outputs.tf
+├── terraform/               ← Terraform workspace: main infrastructure
+│   ├── modules/
+│   │   ├── vpc/             ← VPC, subnets, IGW, NAT Gateway, route tables
+│   │   ├── security_groups/ ← ALB SG, application instances SG, DB instance SG
+│   │   ├── ecr/             ← Two ECR repositories (backend + frontend)
+│   │   ├── iam/             ← GitHub OIDC provider, GH Actions role, EC2 instance profile
+│   │   ├── ec2_app/         ← Two application EC2 instances, Elastic IPs, key pair
+│   │   ├── ec2_db/          ← MongoDB EC2 instance (private subnet, user_data)
+│   │   └── alb/             ← ALB, target group, listener
+│   ├── main.tf              ← Root module: calls all child modules, wires inputs/outputs
+│   ├── variables.tf
+│   ├── outputs.tf
+│   ├── provider.tf
+│   └── backend.tf           ← S3 remote state backend configuration
+├── scripts/
+│   ├── build-infra.sh
+│   └── destroy-infra.sh
+├── backend/
+├── frontend/
+├── mongo/
+└── docker-compose files
+```
+
+Each module folder contains its own `main.tf`, `variables.tf`, and `outputs.tf`. The root `main.tf` calls all modules and wires their inputs and outputs together.
+
+
+### Scripts Notes:
+The project uses two shell scripts for full lifecycle management. Running either script requires no additional manual steps.
+
+**`build-infra.sh` — full provisioning from scratch:**
+1. Runs `terraform apply` in `bootstrap/` — creates S3 bucket and DynamoDB table
+2. Runs `terraform init` in `terraform/` — initializes with the S3 backend
+3. Auto-detects current admin IP via `curl -s ifconfig.me`
+4. Reads SSH public key from `~/.ssh/greencart-key.pub`
+5. Runs `terraform apply` in `terraform/` — provisions all AWS infrastructure
+6. Reads Terraform outputs (Elastic IPs of both application EC2 instances)
+7. Sets the following GitHub Actions secrets automatically via the `gh` CLI:
+   - `EC2_APP_IP_1` and `EC2_APP_IP_2` — Elastic IPs from Terraform outputs
+   - `MONGO_URL` — MongoDB connection string from Terraform outputs
+   - `EC2_SSH_PRIVATE_KEY` — private key read from `~/.ssh/greencart-key`
+   - `AWS_ROLE_ARN` — GitHub Actions IAM role ARN from Terraform outputs
+
+**`destroy-infra.sh` — full teardown to zero:**
+1. Runs `terraform destroy` in `terraform/` — tears down all main infrastructure (state is still readable from S3 at this point)
+2. Runs `terraform destroy` in `bootstrap/` — `force_destroy` empties the S3 bucket, then both S3 and DynamoDB are deleted
+
+After `destroy-infra.sh` completes, the AWS account is in exactly the same state as before `build-infra.sh` was ever run. The full provisioning flow can be repeated cleanly.
+
+**Prerequisite — run once before the first `build-infra.sh`:**
+- Generate the SSH key pair: `ssh-keygen -t ed25519 -f ~/.ssh/greencart-key`
+- Authenticate the GitHub CLI: `gh auth login`
+
+
 ### Architecture Flow:
 **Client -> ALB (public subnet) -> nginx Container on Application EC2 (public subnet, port 80) -> [static files served directly] OR [/api/* proxied to Express Container (internal Docker network)] -> MongoDB Container on dedicated DB EC2 instance (private subnet)**
 
 ### Left to decide:
-- Work tree files platform.
-- Decide which version of each element, resource, library, or extension in our project, so that conflicts will not exist.
+- Nothing currently open. All known decisions have been documented above.
 
 
 ### Recommended Build Order (nice to have — follow if circumstances allow):
@@ -448,6 +611,4 @@ The goal of this order is to avoid any situation where infrastructure is built o
 
 
 ### Left to do:
-- A `build-infra` script must be created that provisions the entire AWS infrastructure from scratch in the correct order.
-- A `destroy-infra` script must be created that tears down all provisioned AWS infrastructure completely, from top to bottom, with no manual steps required.
-- Both scripts must be consistent with the architecture defined in this document.
+- **Phase 5:** Write the README.

@@ -10,6 +10,7 @@ services:
       - mongodb_data:/data/db # Mount a named volume folder we defined below to the folder where MongoDB stores its data. This give as a persistent storage for our database, so that even if the container is stopped or removed, the data will still be available in the named volume.
     ports:
       - "27017:27017" # Expose the port 27017 of the container, and connect it to the port 27017 inside the container, that used by MongoDB.
+    restart: unless-stopped
 
 volumes: 
   mongodb_data: # Declare a volume in folder named "mongodb_data", and we use it in mongodb.volumes .

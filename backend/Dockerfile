@@ -1,4 +1,4 @@
-# Here we are using a multi-stage build to ?????????
+# Here we are using a multi-stage build to create a smaller final image for our app. 
 
 # In the first stage:
 # We take a Node.js environment, install all the tools and dependencies we need 
