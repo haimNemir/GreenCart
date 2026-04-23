@@ -7,7 +7,12 @@ Instructions:
 4.	The runtime should be on any Linux distro you prefer
 5.	Every component of the architecture should run in its own container
 6.	All the architecture should be fully defined by scripts and code (IaC) saved in github
-7.	The DB should contain this data: [ { "_id": 1, "name": "apples", "qty": 5, "rating": 3 }, { "_id": 2, "name": "bananas", "qty": 7, "rating": 1, "microsieverts": 0.1 }, { "_id": 3, "name": "oranges", "qty": 6, "rating": 2 }, { "_id": 4, "name": "avocados", "qty": 3, "rating": 5 }, ]
+7.	The DB should contain this data: [ 
+    { "_id": 1, "name": "apples", "qty": 5, "rating": 3 }, 
+    { "_id": 2, "name": "bananas", "qty": 7, "rating": 1, "microsieverts": 0.1 },
+    { "_id": 3, "name": "oranges", "qty": 6, "rating": 2 },
+    { "_id": 4, "name": "avocados", "qty": 3, "rating": 5 }, 
+    ]
 8.	The exercise submission should be a git repo with all the scripts and automation code to provision the architecture.
 9.	The exercise will be checked by running the scripts in the submitted repo.
 10.	Tests that the exercise should pass:

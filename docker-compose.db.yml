@@ -1,0 +1,15 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: greencart-mongodb
+    environment:
+      - MONGO_INITDB_DATABASE=greencart
+    volumes:
+      # Mount the initialization script (what we called the "seed" script.) to a specific folder ("/docker-entrypoint-initdb.d") that MongoDB executes on startup. And allow read-only access to the script.
+      - ./mongo/init.js:/docker-entrypoint-initdb.d/init.js:ro
+      - mongodb_data:/data/db # Mount a named volume folder we defined below to the folder where MongoDB stores its data. This give as a persistent storage for our database, so that even if the container is stopped or removed, the data will still be available in the named volume.
+    ports:
+      - "27017:27017" # Expose the port 27017 of the container, and connect it to the port 27017 inside the container, that used by MongoDB.
+
+volumes: 
+  mongodb_data: # Declare a volume in folder named "mongodb_data", and we use it in mongodb.volumes .

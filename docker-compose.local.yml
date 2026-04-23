@@ -1,0 +1,41 @@
+# Temperary file for local running.
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: greencart-mongodb
+    environment:
+      - MONGO_INITDB_DATABASE=greencart
+    volumes:
+      - ./mongo/init.js:/docker-entrypoint-initdb.d/init.js:ro
+      - mongodb_data:/data/db
+    networks:
+      - app-net
+
+  backend:
+    build:
+      context: ./backend
+    container_name: greencart-backend
+    environment:
+      - MONGO_URL=mongodb://mongodb:27017
+    depends_on:
+      - mongodb
+    networks:
+      - app-net
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: greencart-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - app-net
+
+networks:
+  app-net:
+    driver: bridge
+
+volumes:
+  mongodb_data:

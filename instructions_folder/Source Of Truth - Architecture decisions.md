@@ -52,10 +52,12 @@ ALB
  └── nginx (port 80)
       ├── GET /           → serves index.html directly
       ├── GET /app.js     → serves app.js directly
-      └── GET /api/*      → proxies to Express (internal Docker network)
-                                └── Express handles the route
-                                └── Express queries MongoDB
-                                └── Express returns JSON
+      ├── GET /api/*      → proxies to Express (internal Docker network)
+      │                         └── Express handles the route
+      │                         └── Express queries MongoDB
+      │                         └── Express returns JSON
+      └── GET /health     → proxies to Express (internal Docker network)
+                                └── Express returns 200 OK
 ```
 
 nginx is the only container that is publicly reachable. Express is only reachable from nginx over the internal Docker Compose network.
@@ -142,13 +144,25 @@ The CI pipeline is responsible for:
 The CD pipeline is responsible for:
 - pushing **both Docker images** to **Amazon ECR** (one repository per image)
 - SSHing into **each of the two application EC2 instances** and on each:
-  - pulling the updated images: `docker compose pull`
-  - redeploying the updated containers: `docker compose up -d`
+  - pulling the updated images: `docker compose -f docker-compose.app.yml pull`
+  - redeploying the updated containers: `docker compose -f docker-compose.app.yml up -d`
 
 The deployment must run on both application EC2 instances to keep them in sync. Deploying to only one instance would leave the other running the previous version.
 
+The CD pipeline requires the following GitHub Actions secrets:
+- **`EC2_SSH_PRIVATE_KEY`** — the private key used to SSH into both application EC2 instances
+- **`EC2_APP_IP_1`** and **`EC2_APP_IP_2`** — the Elastic IPs of the two application EC2 instances (exposed as Terraform outputs)
+
 This CI/CD design was chosen in order to keep the project simple, practical, and aligned with the selected AWS-based architecture, without introducing Kubernetes.
 
+
+### Docker Compose File Structure Notes:
+The project uses **two separate Docker Compose files**, one per EC2 role:
+
+- **`docker-compose.app.yml`** — used on the application EC2 instances. Defines the nginx and Express containers.
+- **`docker-compose.db.yml`** — used on the MongoDB EC2 instance. Defines the MongoDB container and the seed script volume mount. Downloaded via `curl` from the public GitHub repository as part of the `user_data` provisioning script.
+
+This separation ensures each EC2 instance only knows about the services it runs. There is no risk of accidentally starting the wrong services on the wrong machine.
 
 ### Validation Notes:
 The project will use:
@@ -181,6 +195,7 @@ MongoDB will run on:
 - **one dedicated EC2 instance**
 - separate from the application EC2 instances
 - placed in the **private subnet**
+- instance type: **t3.micro** — sufficient for this exercise given the minimal dataset (4 documents)
 
 ### Network Design Notes:
 The subnet placement for each component was decided as follows:
@@ -245,10 +260,10 @@ Security group inbound rules:
 | Security Group | Port | Protocol | Source | Purpose |
 |---|---|---|---|---|
 | ALB SG | 80 | HTTP | `0.0.0.0/0` | Public web traffic |
-| Backend instances SG | 80 | HTTP | ALB SG | nginx — ALB health checks and traffic |
-| Backend instances SG | 22 | SSH | Admin IP | Direct admin access |
-| DB instance SG | 27017 | TCP | Backend instances SG | MongoDB application access |
-| DB instance SG | 22 | SSH | Backend instances SG | Admin jump host access |
+| Application instances SG | 80 | HTTP | ALB SG | nginx — ALB health checks and traffic |
+| Application instances SG | 22 | SSH | Admin IP | Direct admin access |
+| DB instance SG | 27017 | TCP | Application instances SG | MongoDB application access |
+| DB instance SG | 22 | SSH | Application instances SG | Admin jump host access |
 
 The container registry design is:
 - **1 Amazon ECR repository** for the backend (Express) image
@@ -390,12 +405,49 @@ The project will use:
 
 All source code, infrastructure code, deployment logic, and automation scripts will be stored in the same repository.
 
-The public visibility means no authentication is required to clone the repository — this is relevant for the MongoDB EC2 `user_data` provisioning script, which clones the repo on first boot without any credentials.
+The public visibility means no authentication is required to clone the repository — this is relevant for the MongoDB EC2 `user_data` provisioning script, which downloads the required files via curl on first boot without any credentials.
 
 ### Architecture Flow:
 **Client -> ALB (public subnet) -> nginx Container on Application EC2 (public subnet, port 80) -> [static files served directly] OR [/api/* proxied to Express Container (internal Docker network)] -> MongoDB Container on dedicated DB EC2 instance (private subnet)**
 
-Left to decide:
+### Left to decide:
 - Work tree files platform.
-- Priority list of what is important to implement first in this project, and what can wait for later.
 - Decide which version of each element, resource, library, or extension in our project, so that conflicts will not exist.
+
+
+### Recommended Build Order (nice to have — follow if circumstances allow):
+
+The goal of this order is to avoid any situation where infrastructure is built one way and then rewritten when bonus features are added. Each phase should be additive only.
+
+**Phase 1 — Application core (local, no cloud)**
+- Express backend: API routes + `/health` endpoint
+- MongoDB seed script + `docker-compose.db.yml`
+- Frontend: `index.html` + `app.js`
+- Dockerfiles for backend (Express) and frontend (nginx)
+- `docker-compose.app.yml` (nginx + Express)
+- Local end-to-end test — verify the full stack works before touching AWS
+
+**Phase 2 — Full AWS infrastructure (Terraform) — built in final form, including ALB**
+- VPC, 2 public subnets, 1 private subnet, IGW, NAT Gateway, route tables
+- Security groups (ALB SG, Application instances SG, DB instance SG)
+- ECR repositories (backend + frontend)
+- IAM: GitHub OIDC, IAM role for GH Actions, instance profile for app EC2s
+- MongoDB EC2 (private subnet, `user_data` self-provisioning)
+- Application EC2 instances ×2 (public subnet, Elastic IPs, SSH key pair)
+- ALB, target group, and listener — included here because the security groups are designed around the ALB from day one; adding it later would require rewriting existing security group rules rather than adding new resources
+
+**Phase 3 — Deployment scripts**
+- `build-infra` — provisions everything from scratch
+- `destroy-infra` — tears everything down completely
+
+**Phase 4 — Bonus: CI/CD pipeline (purely additive)**
+- GitHub Actions (build images → push to ECR → deploy to both EC2s)
+- Does not modify any existing Terraform resources
+
+**Phase 5 — Bonus: README (purely additive)**
+
+
+### Left to do:
+- A `build-infra` script must be created that provisions the entire AWS infrastructure from scratch in the correct order.
+- A `destroy-infra` script must be created that tears down all provisioned AWS infrastructure completely, from top to bottom, with no manual steps required.
+- Both scripts must be consistent with the architecture defined in this document.
