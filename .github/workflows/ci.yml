@@ -118,6 +118,7 @@ jobs:
 
           docker run --rm -d \
             --name frontend-ci \
+            --add-host backend:127.0.0.1 \
             -p 8080:80 \
             greencart-frontend:sha-${SHORT_SHA}
 
