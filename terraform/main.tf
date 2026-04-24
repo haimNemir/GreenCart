@@ -1,10 +1,10 @@
-data "aws_ami" "rhel" {
+data "aws_ami" "al2023" {
   most_recent = true
-  owners      = ["309956199428"] # Official Red Hat AWS account ID.
+  owners      = ["137112412989"] # Official Amazon AWS account ID.
 
   filter {
     name   = "name"
-    values = ["RHEL-9.3*_HVM-*-x86_64-*"]
+    values = ["al2023-ami-2023*-x86_64"]
   }
 
   filter {
@@ -49,7 +49,7 @@ module "ec2_app" {
   source = "./modules/ec2_app"
 
   name                  = "greencart"
-  ami_id                = data.aws_ami.rhel.id
+  ami_id                = data.aws_ami.al2023.id
   instance_type         = "t3.micro"
   subnet_ids            = module.vpc.public_subnet_ids
   security_group_id     = module.security_groups.app_sg_id
@@ -61,7 +61,7 @@ module "ec2_db" {
   source = "./modules/ec2_db"
 
   name              = "greencart"
-  ami_id            = data.aws_ami.rhel.id
+  ami_id            = data.aws_ami.al2023.id
   instance_type     = "t3.micro"
   subnet_id         = module.vpc.private_subnet_id
   security_group_id = module.security_groups.db_sg_id

@@ -33,3 +33,9 @@ variable "public_key" {
   type        = string
   description = "SSH public key content for the EC2 key pair"
 }
+
+variable "instance_count" {
+  type        = number
+  description = "Number of application EC2 instances to create (must match length of subnet_ids)"
+  default     = 2
+}

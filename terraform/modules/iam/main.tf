@@ -2,16 +2,8 @@ data "aws_caller_identity" "current" {} # Get the current AWS account ID
 
 # ---- GitHub OIDC Provider ----
 
-resource "aws_iam_openid_connect_provider" "github" { # Create inside IAM an OIDC provider for GitHub Actions. This allows GitHub Actions to authenticate with AWS using OIDC tokens. This means that if GitHub Actions creates a token to connect to AWS, AWS will trust that token and allow connections from GitHub Actions.
-  url = "https://token.actions.githubusercontent.com" # This URL is the endpoint for GitHub Actions OIDC tokens. When GitHub Actions requests a token, it will be issued by this provider, and AWS will validate it against this URL.
-
-  client_id_list = [ # Here we specify who can use this OIDC provider, in this case the STS service of AWS that decodes the OIDC token and allows GitHub Actions to assume the IAM role we create below.
-    "sts.amazonaws.com",
-  ]
-
-  thumbprint_list = [                           # In the console this value is defined by default. This allows AWS to save the "fingerprint" of the server that connects to AWS, and if the server changes the connection will be rejected. This is a security measure.
-    "6938fd4d98bab03faadb97b34396831e3780aea1", # To get this fingerprint you can check the AWS documentation for GitHub OIDC.
-  ]
+data "aws_iam_openid_connect_provider" "github" {
+  url = "https://token.actions.githubusercontent.com"
 }
 
 # ---- GitHub Actions IAM Role (ECR Push) ----
@@ -24,7 +16,7 @@ data "aws_iam_policy_document" "github_assume_role" { # This data source creates
     ## Allows the external GitHub identity to get access to AWS resources.
     principals {                # Principals in IAM define who can assume the role. Here we specify a federated identity provider — the OIDC provider we created above for GitHub Actions.
       type        = "Federated" # Federated is the opposite of an internal AWS user or service. This means the principal is an external identity such as GitHub Actions.
-      identifiers = [aws_iam_openid_connect_provider.github.arn]
+      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
     }
     # Conditions in IAM policies specify additional rules that must be met for the policy to take effect.
     ## Check for audience.

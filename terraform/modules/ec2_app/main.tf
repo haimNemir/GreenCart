@@ -16,13 +16,15 @@ resource "aws_instance" "app" {
     #!/bin/bash
     set -e
 
-    # Install Docker CE on RHEL 9
-    curl -fsSL https://download.docker.com/linux/rhel/docker-ce.repo \
-      -o /etc/yum.repos.d/docker-ce.repo
-    dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-
-    # Start Docker and enable it to run on every boot
+    # Install Docker on Amazon Linux 2023
+    dnf install -y docker
     systemctl enable --now docker
+
+    # Install Docker Compose v2 plugin
+    mkdir -p /usr/local/lib/docker/cli-plugins
+    curl -fsSL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
+      -o /usr/local/lib/docker/cli-plugins/docker-compose
+    chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
     # Add ec2-user to the docker group so the CI/CD pipeline can run docker commands without sudo
     usermod -aG docker ec2-user
@@ -40,7 +42,7 @@ resource "aws_instance" "app" {
 }
 
 resource "aws_eip" "app" {
-  count  = length(aws_instance.app)
+  count  = var.instance_count
   domain = "vpc"
 
   tags = {
@@ -50,7 +52,7 @@ resource "aws_eip" "app" {
 }
 
 resource "aws_eip_association" "app" {
-  count         = length(aws_instance.app)
+  count         = var.instance_count
   instance_id   = aws_instance.app[count.index].id
   allocation_id = aws_eip.app[count.index].id
 }

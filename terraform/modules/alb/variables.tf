@@ -22,3 +22,9 @@ variable "instance_ids" {
   type        = list(string)
   description = "List of application EC2 instance IDs to register as ALB targets"
 }
+
+variable "instance_count" {
+  type        = number
+  description = "Number of instances to attach to the target group (must match length of instance_ids)"
+  default     = 2
+}
