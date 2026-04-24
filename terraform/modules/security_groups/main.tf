@@ -2,7 +2,7 @@
 
 resource "aws_security_group" "alb" {
   name        = "${var.name}-alb-sg"
-  description = "Security group for the ALB — allows public HTTP traffic inbound"
+  description = "Security group for the ALB - allows public HTTP traffic inbound"
   vpc_id      = var.vpc_id
 
   tags = {
@@ -31,7 +31,7 @@ resource "aws_vpc_security_group_egress_rule" "alb_all_outbound" {
 
 resource "aws_security_group" "app" {
   name        = "${var.name}-app-sg"
-  description = "Security group for application EC2 instances — nginx and Express containers"
+  description = "Security group for application EC2 instances - nginx and Express containers"
   vpc_id      = var.vpc_id
 
   tags = {
@@ -69,7 +69,7 @@ resource "aws_vpc_security_group_egress_rule" "app_all_outbound" {
 
 resource "aws_security_group" "db" {
   name        = "${var.name}-db-sg"
-  description = "Security group for the MongoDB EC2 instance — no direct internet access"
+  description = "Security group for the MongoDB EC2 instance - no direct internet access"
   vpc_id      = var.vpc_id
 
   tags = {

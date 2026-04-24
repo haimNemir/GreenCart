@@ -568,7 +568,17 @@ After `destroy-infra.sh` completes, the AWS account is in exactly the same state
 
 **Prerequisite — run once before the first `build-infra.sh`:**
 - Generate the SSH key pair: `ssh-keygen -t ed25519 -f ~/.ssh/greencart-key`
-- Authenticate the GitHub CLI: `gh auth login`
+- Authenticate the GitHub CLI: `gh auth login --with-token` using a Fine-grained PAT (see below)
+
+**`gh` CLI authentication:**
+`gh` is needed only to set GitHub Actions secrets via the GitHub API (`gh secret set`). A Fine-grained PAT is used instead of a full OAuth login to limit the blast radius if the token is ever exposed.
+
+Token configuration:
+- **Scope:** GreenCart repository only
+- **Permission:** Repository secrets — Read and write (no other permissions)
+- **Expires:** Tue, Jun 23 2026
+
+To authenticate: `echo "<token>" | gh auth login --with-token` (run inside WSL)
 
 
 ### Architecture Flow:

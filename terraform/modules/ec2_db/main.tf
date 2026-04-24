@@ -9,13 +9,16 @@ resource "aws_instance" "db" {
     #!/bin/bash
     set -e
 
-    # Install Docker CE on RHEL 9
-    curl -fsSL https://download.docker.com/linux/rhel/docker-ce.repo \
-      -o /etc/yum.repos.d/docker-ce.repo
-    dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-
-    # Start Docker and enable it to run on every boot
+    # Install Docker on Amazon Linux 2023
+    dnf install -y docker
     systemctl enable --now docker
+
+    # Install Docker Compose v2 plugin
+    mkdir -p /usr/local/lib/docker/cli-plugins
+    curl -fsSL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
+      -o /usr/local/lib/docker/cli-plugins/docker-compose
+    chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
     usermod -aG docker ec2-user
 
     # Create the directory for the MongoDB seed script
