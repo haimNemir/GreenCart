@@ -106,7 +106,6 @@ main() {
   require_command terraform
   require_command aws
   require_command gh
-  require_command jq
 
   log "Build started. Log file: $LOG_FILE"
 
@@ -115,11 +114,7 @@ main() {
   # Step 1: Provision the state backend (S3 bucket + DynamoDB table).
   terraform_apply "$BOOTSTRAP_DIR" "bootstrap" || exit 1
 
-  # Step 2: Detect the current admin IP and read the SSH public key.
-  local admin_cidr
-  admin_cidr="$(curl -s ifconfig.me)/32"
-  record_summary "OK: Detected admin CIDR: $admin_cidr"
-
+  # Step 2: Read the SSH public key.
   if [[ ! -f "${SSH_KEY_PATH}.pub" ]]; then
     log "SSH public key not found at ${SSH_KEY_PATH}.pub"
     log "Run: ssh-keygen -t ed25519 -f $SSH_KEY_PATH"
@@ -130,7 +125,6 @@ main() {
 
   # Step 3: Provision all main infrastructure.
   terraform_apply "$TERRAFORM_DIR" "terraform" \
-    -var="admin_cidr=${admin_cidr}" \
     -var="public_key=${public_key}" || exit 1
 
   # Step 4: Read Terraform outputs.
