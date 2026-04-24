@@ -13,14 +13,14 @@ When we change something in the overall architecture, you should document the ch
 - **Cloud Platform:** AWS
 - **Deployment Model:** Container-based architecture
 - **Load Balancer:** AWS Application Load Balancer (ALB)
-- **CI/CD:** GitHub Actions + Amazon ECR + Docker Compose-based automated deployment to Red Hat Enterprise Linux 9.3 hosts
+- **CI/CD:** GitHub Actions + Amazon ECR + Docker Compose-based automated deployment to Amazon Linux 2023 hosts
 
 
 ### Linux Runtime Notes:
 The project runtime environment will use:
-- **Red Hat Enterprise Linux 9.3**
+- **Amazon Linux 2023**
 
-This is the selected Linux distribution for the project infrastructure.
+RHEL 9.3 was the original selection, but Red Hat AMIs are not available in this AWS account without a Marketplace subscription. Amazon Linux 2023 was selected as a replacement: it is free, always available, uses the same `dnf` package manager, and the default user is also `ec2-user`.
 
 ### Backend Notes:
 Express is used as the backend web framework in order to:
@@ -277,7 +277,7 @@ Security group inbound rules:
 |---|---|---|---|---|
 | ALB SG | 80 | HTTP | `0.0.0.0/0` | Public web traffic |
 | Application instances SG | 80 | HTTP | ALB SG | nginx — ALB health checks and traffic |
-| Application instances SG | 22 | SSH | Admin IP | Direct admin access |
+| Application instances SG | 22 | SSH | `0.0.0.0/0` | Admin and CI/CD access (key-based auth) |
 | DB instance SG | 27017 | TCP | Application instances SG | MongoDB application access |
 | DB instance SG | 22 | SSH | Application instances SG | Admin jump host access |
 
@@ -380,7 +380,7 @@ Each application EC2 instance is assigned an **Elastic IP** so that its public I
 The Elastic IPs are exposed as Terraform outputs and stored as GitHub Actions secrets.
 
 This directly affects the security group design:
-- the application instances must allow inbound **SSH (port 22)** only from the approved administrator IP
+- the application instances allow inbound **SSH (port 22)** from `0.0.0.0/0` — access is secured by SSH key authentication, not IP restriction. This is required because GitHub Actions runners have dynamic IPs that cannot be whitelisted statically.
 - the DB instance does **not** allow inbound SSH from the internet, but **does** allow inbound SSH (port 22) from the backend instances security group
 
 This decision also affects IAM design:
@@ -466,14 +466,11 @@ This full teardown is intentional. The project requirement is "provision from sc
 
 
 ### Admin IP Notes:
-SSH access to the application EC2 instances is restricted to the administrator's current public IP address. This is implemented as a Terraform variable:
+SSH on the application EC2 instances is open to `0.0.0.0/0`. Security is provided entirely by SSH key authentication — the private key is required to connect, so the open CIDR does not increase risk.
 
-- **Variable name:** `var.admin_cidr`
-- **Format:** CIDR notation, e.g. `1.2.3.4/32`
+This decision was made because GitHub Actions runners have dynamic, unpredictable IP addresses. Restricting by IP would require either whitelisting the entire GitHub Actions IP range (large and frequently updated) or dynamically updating the security group before each deploy, both of which add unnecessary complexity.
 
-The `build-infra.sh` script auto-detects the current public IP at run time using `curl -s ifconfig.me` and passes it directly to Terraform. No manual input is required.
-
-Home ISP IPs are dynamic and may change between sessions. Auto-detection ensures the security group always reflects the current IP without any manual action.
+The `var.admin_cidr` variable is still accepted by the `security_groups` module but is no longer used for the SSH rule. It remains in the variable definition for compatibility with the `build-infra.sh` script.
 
 
 ### SSH Key Pair Notes:

@@ -51,11 +51,11 @@ resource "aws_vpc_security_group_ingress_rule" "app_http_from_alb" {
 
 resource "aws_vpc_security_group_ingress_rule" "app_ssh" {
   security_group_id = aws_security_group.app.id
-  cidr_ipv4         = var.admin_cidr # Restrict SSH to the administrator's current public IP only.
+  cidr_ipv4         = "0.0.0.0/0" # SSH key authentication provides the security; IP restriction would block GitHub Actions runners whose IPs are dynamic.
   from_port         = 22
   to_port           = 22
   ip_protocol       = "tcp"
-  description       = "Allow SSH access from the admin IP"
+  description       = "Allow SSH access from anywhere (key-based auth)"
 }
 
 resource "aws_vpc_security_group_egress_rule" "app_all_outbound" {
