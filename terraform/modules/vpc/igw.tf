@@ -1,3 +1,4 @@
+# This 
 resource "aws_internet_gateway" "this" {
   vpc_id = aws_vpc.this.id
 
@@ -7,9 +8,13 @@ resource "aws_internet_gateway" "this" {
   }
 }
 
-resource "aws_eip" "nat" {
-  domain = "vpc" # EIP must be in the VPC domain to be attached to a NAT Gateway.
-
+# This Elastic IP will be used for the NAT Gateway.
+# The NAT Gateway must have a EIP, and here we dont use it at all.
+resource "aws_eip" "nat" { 
+  # domain = "vpc" - Allow the EIP to connect to the NAT Gateway. 
+  # This is required for the NAT Gateway to function properly.
+  domain = "vpc"
+  
   tags = {
     Name    = "${var.name}-nat-eip"
     Project = var.name

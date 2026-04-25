@@ -13,7 +13,22 @@
       "PowerShell(wsl cat /tmp/greencart-build-infra-20260425-155807.log 2>&1)",
       "PowerShell(wsl --exec bash -c \"cd /mnt/c/Users/Haim/Documents/Projects/GreenCart && git show 'origin/main:.github/workflows/ci.yml' | head -15\")",
       "PowerShell(wsl --exec bash -c \"cd /mnt/c/Users/Haim/Documents/Projects/GreenCart && git status && echo '---' && git log --oneline origin/main..HEAD\")",
-      "PowerShell(wsl --exec bash -c \"cd /mnt/c/Users/Haim/Documents/Projects/GreenCart && git diff -- bootstrap/dynamodb.tf bootstrap/s3.tf terraform/backend.tf terraform/main.tf README.md\")"
+      "PowerShell(wsl --exec bash -c \"cd /mnt/c/Users/Haim/Documents/Projects/GreenCart && git diff -- bootstrap/dynamodb.tf bootstrap/s3.tf terraform/backend.tf terraform/main.tf README.md\")",
+      "PowerShell(wsl --exec bash -c \"cd /mnt/c/Users/Haim/Documents/Projects/GreenCart && git fetch origin && git log --oneline bulid_structure..origin/main\")",
+      "PowerShell(wsl --exec bash -c \"cd /mnt/c/Users/Haim/Documents/Projects/GreenCart && git log --oneline origin/bulid_structure..origin/main\")",
+      "PowerShell(wsl --exec bash -c \"cd /mnt/c/Users/Haim/Documents/Projects/GreenCart && git show --stat bb45711 && echo '===' && git show --stat 807a548 && echo '===' && git show --stat 6fa8fb7\")",
+      "PowerShell(wsl --exec bash -c \"gh run list --repo haimNemir/GreenCart --workflow ci.yml --limit 3 --json status,conclusion,displayTitle,createdAt,databaseId\")",
+      "PowerShell(wsl --exec bash -c \"cd /mnt/c/Users/Haim/Documents/Projects/GreenCart && terraform -chdir=terraform output -raw alb_dns_name\")",
+      "PowerShell(wsl --exec bash -c \"curl -s -o /dev/null -w '%{http_code}' http://greencart-alb-1701900061.us-east-1.elb.amazonaws.com/ && echo '' && curl -s -o /dev/null -w '%{http_code}' http://greencart-alb-1701900061.us-east-1.elb.amazonaws.com/health && echo '' && curl -s http://greencart-alb-1701900061.us-east-1.elb.amazonaws.com/api/items\")",
+      "PowerShell(wsl cat /tmp/greencart-build-infra-20260425-170406.log)",
+      "PowerShell(tail -60)",
+      "PowerShell(wsl --exec bash -c \"grep -A5 'ERROR\\\\|error\\\\|Error' /tmp/greencart-build-infra-20260425-170406.log | tail -80\")",
+      "PowerShell(wsl --exec bash -c \"sudo hwclock --hctosys && echo 'Clock synced' && date\")",
+      "PowerShell(wsl --exec bash -c \"cat /etc/wsl.conf 2>/dev/null || echo 'file does not exist'\")",
+      "PowerShell(wsl --exec bash -c \"timedatectl status\")",
+      "PowerShell(wsl --exec bash -c \"gh run view 24933231994 --repo haimNemir/GreenCart --log-failed 2>&1\")",
+      "PowerShell(wsl --exec bash -c \"grep -n 'event_name' /mnt/c/Users/Haim/Documents/Projects/GreenCart/.github/workflows/ci.yml\")",
+      "PowerShell(wsl --exec bash -c \"cd /mnt/c/Users/Haim/Documents/Projects/GreenCart && git diff .github/workflows/ci.yml\")"
     ]
   }
 }
