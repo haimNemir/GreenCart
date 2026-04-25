@@ -21,8 +21,8 @@ echo "<token>" | gh auth login --with-token
 ./scripts/build-infra.sh
 ```
 
-The script handles everything: S3/DynamoDB backend, all AWS infrastructure, and all GitHub Actions secrets.
-After it completes, push to `main` to trigger the first CI/CD deploy.
+The script handles everything: S3/DynamoDB backend, all AWS infrastructure, GitHub Actions secrets,
+and the first CI/CD deploy. The application is live when the script completes.
 
 ---
 
@@ -61,7 +61,11 @@ gh secret set EC2_SSH_PRIVATE_KEY --repo haimNemir/GreenCart < ~/.ssh/greencart-
 
 **4. Trigger the first deploy**
 
-Push to `main` — GitHub Actions builds the images, pushes to ECR, and deploys to both EC2 instances.
+```bash
+gh workflow run ci.yml --repo haimNemir/GreenCart --ref main
+```
+
+GitHub Actions builds the images, pushes to ECR, and deploys to both EC2 instances.
 
 ---
 

@@ -2,8 +2,13 @@ data "aws_caller_identity" "current" {} # Get the current AWS account ID
 
 # ---- GitHub OIDC Provider ----
 
-data "aws_iam_openid_connect_provider" "github" {
-  url = "https://token.actions.githubusercontent.com"
+resource "aws_iam_openid_connect_provider" "github" {
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
+  thumbprint_list = [
+    "6938fd4d98bab03faadb97b34396831e3780aea1",
+    "1c58a3a8518e8759bf075b76b750d4f2df264fcd",
+  ]
 }
 
 # ---- GitHub Actions IAM Role (ECR Push) ----
@@ -16,7 +21,7 @@ data "aws_iam_policy_document" "github_assume_role" { # This data source creates
     ## Allows the external GitHub identity to get access to AWS resources.
     principals {                # Principals in IAM define who can assume the role. Here we specify a federated identity provider — the OIDC provider we created above for GitHub Actions.
       type        = "Federated" # Federated is the opposite of an internal AWS user or service. This means the principal is an external identity such as GitHub Actions.
-      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
+      identifiers = [aws_iam_openid_connect_provider.github.arn]
     }
     # Conditions in IAM policies specify additional rules that must be met for the policy to take effect.
     ## Check for audience.

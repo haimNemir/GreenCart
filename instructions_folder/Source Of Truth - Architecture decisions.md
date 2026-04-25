@@ -139,6 +139,7 @@ The project will use **GitHub Actions** for CI/CD.
 **Workflow file:** `.github/workflows/ci.yml`
 
 **Triggers:**
+- `workflow_dispatch` — triggered manually or automatically by `build-infra.sh` after provisioning from scratch. Runs the full pipeline: build → smoke tests → ECR push → rolling deploy to both EC2 instances.
 - `pull_request` targeting `main` — runs build + smoke tests only. No ECR push, no deploy. The OIDC role blocks AWS access from PRs by design.
 - `push` to `main` — runs the full pipeline: build → smoke tests → ECR push → rolling deploy to both EC2 instances.
 - `push` of a `v*.*.*` tag — runs build → smoke tests → ECR push with a version tag (e.g. `1.2.3`). No deploy — versioned tags are for image versioning only.
@@ -365,6 +366,13 @@ The project will use:
 - **1 IAM role for GitHub Actions** in order to push images to both ECR repositories and perform deployment actions
 - **1 instance profile / IAM role for the application EC2 instances** in order to support ECR image pulls for both images
 
+**GitHub OIDC Provider — created by Terraform, not looked up:**
+The OIDC provider (`https://token.actions.githubusercontent.com`) is defined as an `aws_iam_openid_connect_provider` **resource** in `terraform/modules/iam/main.tf`. It is created by Terraform on the first `terraform apply`.
+
+An earlier version used a `data` source to look it up as a pre-existing resource. This caused `build-infra.sh` to fail with `couldn't find resource` on a fresh AWS account where the provider had never been created. The fix was to convert it to a `resource` block so Terraform creates it itself.
+
+The OIDC provider is idempotent within a single AWS account — AWS allows only one OIDC provider per issuer URL. If the provider already exists (e.g., from a previous run that was not fully destroyed), Terraform will error with `EntityAlreadyExists`. The `destroy-infra.sh` flow removes it cleanly as part of `terraform destroy`.
+
 
 ### Instance Access Notes:
 The project will use:
@@ -573,6 +581,8 @@ The project uses two shell scripts for full lifecycle management. Running either
    - `MONGO_URL` — MongoDB connection string from Terraform outputs
    - `EC2_SSH_PRIVATE_KEY` — private key read from `~/.ssh/greencart-key`
    - `AWS_ROLE_ARN` — GitHub Actions IAM role ARN from Terraform outputs
+7. Waits for both app EC2 instances to pass AWS status checks (ensures Docker is installed from `user_data` before CI tries to SSH in)
+8. Triggers the CI/CD `workflow_dispatch` workflow via `gh workflow run` and streams the live deployment output — the application is fully deployed when the script completes. No manual `push` to `main` is required.
 
 **`destroy-infra.sh` — full teardown to zero:**
 1. Runs `terraform destroy` in `terraform/` — tears down all main infrastructure (state is still readable from S3 at this point)
