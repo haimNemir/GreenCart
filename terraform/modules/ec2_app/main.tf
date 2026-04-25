@@ -1,9 +1,9 @@
 resource "aws_key_pair" "this" {
   key_name   = "${var.name}-key"
 
-  # The public key get's his value from the "build-infra.sh" script, which reads it from 
-  # "~/.ssh/greencart-key.pub" in my local machine. The same one is passed to the "ec2_db", 
-  # so SSH just works between the app and the db.  
+    # The public key get's his value from the "build-infra.sh" script, which reads it from 
+    # "~/.ssh/greencart-key.pub" in my local machine. The same one is passed to the "ec2_db", 
+    # so SSH just works between the app and the db.  
   public_key = var.public_key # The public key is passed in from the build-infra.sh script, which reads it from ~/.ssh/greencart-key.pub on the admin machine. The private key never enters Terraform state.
 }
 
@@ -12,10 +12,20 @@ resource "aws_instance" "app" {
   ami                    = var.ami_id
   instance_type          = var.instance_type
   subnet_id              = var.subnet_ids[count.index]
-  vpc_security_group_ids = [var.security_group_id] # This SG allows inbound traffic on port 80 from the ALB SG, and SSH access on port 22 from the admin's IP.
+    
+  # This SG allows inbound traffic on port 80 from  the ALB SG, and SSH access on port 22 
+  # to all IPs also. The reason we allow SSH from all IPs is to enable to the CI pipeline to connect 
+  # with SSH to the app instances and run docker-compose commands, and we can't predict the dynamic 
+  # IPs of the CI runners because they are allways changing
+  vpc_security_group_ids = [var.security_group_id] 
   key_name               = aws_key_pair.this.key_name
+    
+  # iam_instance_profile - attaches an IAM Role to the EC2 instance, And its make AWS to 
+  # injects temporary, auto-rotating credentials onto the instance. So he can pull the 
+  # new app image from ECR.
   iam_instance_profile   = var.instance_profile_name
 
+  # user_data - The script that runs on the EC2 instance at launch time. 
   user_data = <<-EOF
     #!/bin/bash
     set -e
@@ -33,14 +43,17 @@ resource "aws_instance" "app" {
     # Add ec2-user to the docker group so the CI/CD pipeline can run docker commands without sudo
     usermod -aG docker ec2-user
 
-    # Download the application Docker Compose file so it is ready for the first CI/CD deployment
+    # Download the application Docker Compose file from GitHub so it is ready for the first CI/CD deployment
     curl -fsSL https://raw.githubusercontent.com/haimNemir/GreenCart/main/docker-compose.app.yml \
       -o /home/ec2-user/docker-compose.app.yml
     chown ec2-user:ec2-user /home/ec2-user/docker-compose.app.yml
   EOF
 
   lifecycle {
-    ignore_changes = [ami]
+    # This prevents Terraform from trying to replace the EC2 instance just because AWS 
+    # releases a new AMI version of Amazon Linux 2023, which would cause the instance to be
+    # terminated and replaced.
+    ignore_changes = [ami] 
   }
 
   tags = {
