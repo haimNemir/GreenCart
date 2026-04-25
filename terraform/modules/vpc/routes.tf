@@ -18,11 +18,17 @@ resource "aws_route_table_association" "public" { # Associating this route table
   route_table_id = aws_route_table.public.id
 }
 
+
+
+
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.this.id
 
   route {
-    cidr_block     = "0.0.0.0/0" # Route outbound traffic from the private subnet through the NAT Gateway. This allows instances in the private subnet to reach the internet (e.g. to pull Docker images) without being directly reachable from the internet.
+    # Route outbound traffic from the private subnet through the NAT Gateway. This allows instances 
+    # in the private subnet to reach the internet (e.g. to pull Docker images) without being 
+    # directly reachable from the internet.
+    cidr_block     = "0.0.0.0/0" # Tell - All traffic inside going to: "nat_gateway_id".
     nat_gateway_id = aws_nat_gateway.this.id
   }
 

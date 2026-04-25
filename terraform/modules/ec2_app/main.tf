@@ -1,5 +1,9 @@
 resource "aws_key_pair" "this" {
   key_name   = "${var.name}-key"
+
+  # The public key get's his value from the "build-infra.sh" script, which reads it from 
+  # "~/.ssh/greencart-key.pub" in my local machine. The same one is passed to the "ec2_db", 
+  # so SSH just works between the app and the db.  
   public_key = var.public_key # The public key is passed in from the build-infra.sh script, which reads it from ~/.ssh/greencart-key.pub on the admin machine. The private key never enters Terraform state.
 }
 
@@ -8,7 +12,7 @@ resource "aws_instance" "app" {
   ami                    = var.ami_id
   instance_type          = var.instance_type
   subnet_id              = var.subnet_ids[count.index]
-  vpc_security_group_ids = [var.security_group_id]
+  vpc_security_group_ids = [var.security_group_id] # This SG allows inbound traffic on port 80 from the ALB SG, and SSH access on port 22 from the admin's IP.
   key_name               = aws_key_pair.this.key_name
   iam_instance_profile   = var.instance_profile_name
 

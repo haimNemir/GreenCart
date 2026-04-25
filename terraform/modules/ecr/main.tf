@@ -1,5 +1,7 @@
 resource "aws_ecr_repository" "this" {
-  for_each = toset(var.repositories) # toset converts the list to a set to avoid duplicates. The result looks like: { "backend" = "backend", "frontend" = "frontend" }
+  # for_each - Instead of creating a single repository, he will create one repository for each name
+  # in the var.repositories list.
+  for_each = toset(var.repositories) # The original list looks like: [ "backend", "frontend" ], and toset converts the list to a set to avoid duplicates. The result looks like: { "backend" = "backend", "frontend" = "frontend" }
 
   name         = "greencart-${each.value}"
   force_delete = true # Allows deleting the repository even when it contains images — required for full teardown via destroy-infra.sh.

@@ -28,9 +28,11 @@ Prerequisites (run once before the first execution):
 EOF
 }
 
+# Writes timestamped messages to the log file only — not to the terminal.
+# Use this for all routine progress messages. Fatal errors that the user must
+# see immediately are echoed to stderr separately before calling exit.
 log() {
-  local message="$1"
-  printf '[%s] %s\n' "$(date +"%Y-%m-%d %H:%M:%S")" "$message" | tee -a "$LOG_FILE"
+  printf '[%s] %s\n' "$(date +"%Y-%m-%d %H:%M:%S")" "$1" >> "$LOG_FILE"
 }
 
 record_summary() {
@@ -38,11 +40,19 @@ record_summary() {
   log "$1"
 }
 
+# Prints a fatal error to stderr (visible on the terminal) and to the log,
+# then exits. Use instead of bare 'log + exit' for errors the user must see.
+die() {
+  local msg="ERROR: $1"
+  log "$msg"
+  printf '%s\n' "$msg" >&2
+  exit 1
+}
+
 require_command() {
   local cmd="$1"
   if ! command -v "$cmd" >/dev/null 2>&1; then
-    log "Required command not found: $cmd"
-    exit 1
+    die "Required command not found: $cmd"
   fi
 }
 
@@ -84,9 +94,7 @@ check_clock_drift() {
   drift="${drift#-}" # absolute value
 
   if (( drift > max_drift )); then
-    log "ERROR: System clock is ${drift}s off from AWS time (limit: ${max_drift}s)."
-    log "Fix: run 'sudo hwclock --hctosys' to sync the WSL clock, then retry."
-    exit 1
+    die "System clock is ${drift}s off from AWS time (limit: ${max_drift}s). Run 'sudo hwclock --hctosys' to sync, then retry."
   fi
 
   log "OK: Clock drift check passed (${drift}s off from AWS time)"
@@ -155,24 +163,23 @@ main() {
 
   log "Build started. Log file: $LOG_FILE"
 
-  check_clock_drift || exit 1
-  run_cmd "Validate AWS credentials" aws sts get-caller-identity --region "$AWS_REGION" || exit 1
+  check_clock_drift
+  run_cmd "Validate AWS credentials" aws sts get-caller-identity --region "$AWS_REGION" \
+    || die "AWS credentials are invalid or expired."
 
   # Step 1: Provision the state backend (S3 bucket + DynamoDB table).
-  terraform_apply "$BOOTSTRAP_DIR" "bootstrap" || exit 1
+  terraform_apply "$BOOTSTRAP_DIR" "bootstrap" || die "Bootstrap Terraform apply failed. See log: $LOG_FILE"
 
   # Step 2: Read the SSH public key.
   if [[ ! -f "${SSH_KEY_PATH}.pub" ]]; then
-    log "SSH public key not found at ${SSH_KEY_PATH}.pub"
-    log "Run: ssh-keygen -t ed25519 -f $SSH_KEY_PATH"
-    exit 1
+    die "SSH public key not found at ${SSH_KEY_PATH}.pub — run: ssh-keygen -t ed25519 -f $SSH_KEY_PATH"
   fi
   local public_key
   public_key="$(cat "${SSH_KEY_PATH}.pub")"
 
   # Step 3: Provision all main infrastructure.
   terraform_apply "$TERRAFORM_DIR" "terraform" \
-    -var="public_key=${public_key}" || exit 1
+    -var="public_key=${public_key}" || die "Main Terraform apply failed. See log: $LOG_FILE"
 
   # Step 4: Read Terraform outputs.
   local ip1 ip2 mongo_private_ip alb_dns role_arn
@@ -190,15 +197,15 @@ main() {
 
   # Step 5: Set GitHub Actions secrets so the CI/CD pipeline can deploy.
   run_cmd "Set EC2_APP_IP_1 secret" \
-    gh secret set EC2_APP_IP_1 --repo "$GITHUB_REPO" --body "$ip1" || exit 1
+    gh secret set EC2_APP_IP_1 --repo "$GITHUB_REPO" --body "$ip1" || die "Failed to set GitHub secrets."
   run_cmd "Set EC2_APP_IP_2 secret" \
-    gh secret set EC2_APP_IP_2 --repo "$GITHUB_REPO" --body "$ip2" || exit 1
+    gh secret set EC2_APP_IP_2 --repo "$GITHUB_REPO" --body "$ip2" || die "Failed to set GitHub secrets."
   run_cmd "Set MONGO_URL secret" \
-    gh secret set MONGO_URL --repo "$GITHUB_REPO" --body "mongodb://${mongo_private_ip}:27017" || exit 1
+    gh secret set MONGO_URL --repo "$GITHUB_REPO" --body "mongodb://${mongo_private_ip}:27017" || die "Failed to set GitHub secrets."
   run_cmd "Set EC2_SSH_PRIVATE_KEY secret" \
-    gh secret set EC2_SSH_PRIVATE_KEY --repo "$GITHUB_REPO" < "$SSH_KEY_PATH" || exit 1
+    gh secret set EC2_SSH_PRIVATE_KEY --repo "$GITHUB_REPO" < "$SSH_KEY_PATH" || die "Failed to set GitHub secrets."
   run_cmd "Set AWS_ROLE_ARN secret" \
-    gh secret set AWS_ROLE_ARN --repo "$GITHUB_REPO" --body "$role_arn" || exit 1
+    gh secret set AWS_ROLE_ARN --repo "$GITHUB_REPO" --body "$role_arn" || die "Failed to set GitHub secrets."
 
   # Step 6: Wait for the app EC2 instances to pass status checks before triggering CI.
   # user_data installs Docker on first boot — the deploy SSH step will fail if it runs
@@ -216,11 +223,11 @@ main() {
   run_cmd "Wait for app instances to pass EC2 status checks" \
     aws ec2 wait instance-status-ok \
       --region "$AWS_REGION" \
-      --instance-ids $instance_ids || exit 1
+      --instance-ids $instance_ids || die "EC2 status check timed out."
 
   # Step 7: Trigger the CI/CD workflow to build images and deploy the application.
   run_cmd "Trigger CI/CD workflow" \
-    gh workflow run ci.yml --repo "$GITHUB_REPO" --ref main || exit 1
+    gh workflow run ci.yml --repo "$GITHUB_REPO" --ref main || die "Failed to trigger CI/CD workflow."
 
   sleep 5
 
@@ -228,30 +235,28 @@ main() {
   run_id=$(gh run list --repo "$GITHUB_REPO" --workflow ci.yml \
     --limit 1 --json databaseId --jq '.[0].databaseId')
 
-  if [[ -z "$run_id" ]]; then
-    log "ERROR: Could not find the triggered workflow run"
-    exit 1
-  fi
+  [[ -n "$run_id" ]] || die "Could not find the triggered workflow run."
 
-  log "CI/CD run $run_id started. Waiting for deployment to complete (this takes several minutes)..."
-  if gh run watch "$run_id" --repo "$GITHUB_REPO" --exit-status 2>&1 | tee -a "$LOG_FILE"; then
+  log "CI/CD run $run_id started. Waiting for deployment to complete..."
+  if gh run watch "$run_id" --repo "$GITHUB_REPO" --exit-status >>"$LOG_FILE" 2>&1; then
     record_summary "OK: CI/CD deployment completed"
   else
-    record_summary "ERROR: CI/CD deployment failed — run: gh run view $run_id --repo $GITHUB_REPO --log-failed"
-    exit 1
+    record_summary "ERROR: CI/CD deployment failed"
+    die "CI/CD deployment failed. Inspect with: gh run view $run_id --repo $GITHUB_REPO --log-failed"
   fi
 
   log "Build finished successfully."
-  printf '\n================================================\n'
-  printf ' GreenCart is live!\n'
-  printf '================================================\n'
-  printf ' Load-balanced URL (use this):  http://%s\n' "$alb_dns"
-  printf ' App instance 1 (direct):       http://%s\n' "$ip1"
-  printf ' App instance 2 (direct):       http://%s\n' "$ip2"
-  printf '================================================\n\n'
 
-  printf 'Summary:\n'
-  printf '%s\n' "${SUMMARY_LINES[@]}"
+  # Print the final banner and summary to both the terminal and the log.
+  {
+    printf '\n================================================\n'
+    printf ' GreenCart is live!\n'
+    printf '================================================\n'
+    printf ' Load-balanced URL:  http://%s\n' "$alb_dns"
+    printf '================================================\n\n'
+    printf 'Summary:\n'
+    printf '%s\n' "${SUMMARY_LINES[@]}"
+  } | tee -a "$LOG_FILE"
 }
 
 main "$@"

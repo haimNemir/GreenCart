@@ -1,4 +1,4 @@
-# This 
+# This IGW attaches to the VPC and allows resources in the public subnets to access the internet and vice versa. 
 resource "aws_internet_gateway" "this" {
   vpc_id = aws_vpc.this.id
 
@@ -21,6 +21,8 @@ resource "aws_eip" "nat" {
   }
 }
 
+# Here we create the NAT for the private subnets to allow for the private subnets to access the internet for update the OS of the DB.
+# The NAT Gateway need to be in the public subnet to allow him to connect to the internet trough the IGW (He is also in the public subnet), and the private subnets will route the traffic to the NAT Gateway with the route table.
 resource "aws_nat_gateway" "this" {
   allocation_id = aws_eip.nat.id
   subnet_id     = aws_subnet.public[0].id # NAT Gateway must be placed in a public subnet. We use the first public subnet (AZ-a).
