@@ -5,7 +5,7 @@ variable "name" {
 
 variable "ami_id" {
   type        = string
-  description = "AMI ID for the application EC2 instances (RHEL 9.3)"
+  description = "AMI ID for the application EC2 instances (Amazon Linux 2023)"
 }
 
 variable "instance_type" {

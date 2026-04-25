@@ -35,6 +35,10 @@ resource "aws_instance" "app" {
     chown ec2-user:ec2-user /home/ec2-user/docker-compose.app.yml
   EOF
 
+  lifecycle {
+    ignore_changes = [ami]
+  }
+
   tags = {
     Name    = "${var.name}-app-${count.index + 1}"
     Project = var.name

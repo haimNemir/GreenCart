@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\" http://greencart-alb-636309453.us-east-1.elb.amazonaws.com/api/items)",
+      "Bash(aws elbv2 *)",
+      "Bash(aws ec2 *)",
+      "Bash(aws iam *)",
+      "Bash(aws s3api *)",
+      "Bash(aws dynamodb *)",
+      "PowerShell(wsl --exec bash -c \"find /home -name 'destroy-infra.sh' 2>/dev/null; find /mnt -name 'destroy-infra.sh' 2>/dev/null\" 2>&1)",
+      "PowerShell(wsl --exec bash -c \"ls /mnt/c/Users/Haim/Documents/Projects/GreenCart/scripts/\" 2>&1)",
+      "PowerShell(wsl --exec bash -c \"cd /mnt/c/Users/Haim/Documents/Projects/GreenCart && bash scripts/destroy-infra.sh\" 2>&1)",
+      "PowerShell(wsl cat /tmp/greencart-build-infra-20260425-155807.log 2>&1)",
+      "PowerShell(wsl --exec bash -c \"cd /mnt/c/Users/Haim/Documents/Projects/GreenCart && git show 'origin/main:.github/workflows/ci.yml' | head -15\")",
+      "PowerShell(wsl --exec bash -c \"cd /mnt/c/Users/Haim/Documents/Projects/GreenCart && git status && echo '---' && git log --oneline origin/main..HEAD\")",
+      "PowerShell(wsl --exec bash -c \"cd /mnt/c/Users/Haim/Documents/Projects/GreenCart && git diff -- bootstrap/dynamodb.tf bootstrap/s3.tf terraform/backend.tf terraform/main.tf README.md\")"
+    ]
+  }
+}

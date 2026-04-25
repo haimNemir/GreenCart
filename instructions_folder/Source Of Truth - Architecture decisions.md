@@ -139,6 +139,7 @@ The project will use **GitHub Actions** for CI/CD.
 **Workflow file:** `.github/workflows/ci.yml`
 
 **Triggers:**
+- `workflow_dispatch` — triggered manually or automatically by `build-infra.sh` after provisioning from scratch. Runs the full pipeline: build → smoke tests → ECR push → rolling deploy to both EC2 instances.
 - `pull_request` targeting `main` — runs build + smoke tests only. No ECR push, no deploy. The OIDC role blocks AWS access from PRs by design.
 - `push` to `main` — runs the full pipeline: build → smoke tests → ECR push → rolling deploy to both EC2 instances.
 - `push` of a `v*.*.*` tag — runs build → smoke tests → ECR push with a version tag (e.g. `1.2.3`). No deploy — versioned tags are for image versioning only.
@@ -365,6 +366,13 @@ The project will use:
 - **1 IAM role for GitHub Actions** in order to push images to both ECR repositories and perform deployment actions
 - **1 instance profile / IAM role for the application EC2 instances** in order to support ECR image pulls for both images
 
+**GitHub OIDC Provider — created by Terraform, not looked up:**
+The OIDC provider (`https://token.actions.githubusercontent.com`) is defined as an `aws_iam_openid_connect_provider` **resource** in `terraform/modules/iam/main.tf`. It is created by Terraform on the first `terraform apply`.
+
+An earlier version used a `data` source to look it up as a pre-existing resource. This caused `build-infra.sh` to fail with `couldn't find resource` on a fresh AWS account where the provider had never been created. The fix was to convert it to a `resource` block so Terraform creates it itself.
+
+The OIDC provider is idempotent within a single AWS account — AWS allows only one OIDC provider per issuer URL. If the provider already exists (e.g., from a previous run that was not fully destroyed), Terraform will error with `EntityAlreadyExists`. The `destroy-infra.sh` flow removes it cleanly as part of `terraform destroy`.
+
 
 ### Instance Access Notes:
 The project will use:
@@ -397,9 +405,27 @@ Admin machine
 ```
 
 This requires:
-- SSH agent forwarding enabled on the admin machine (`ssh -A`)
 - The MongoDB EC2 security group allows inbound SSH (port 22) from the backend instances security group
-- The same EC2 key pair is used for both hops — the MongoDB EC2 is launched with the same key pair as the application EC2 instances. The private key never leaves the admin machine; SSH agent forwarding passes the authentication through transparently.
+- The same EC2 key pair is used for both hops — the MongoDB EC2 is launched with the same key pair as the application EC2 instances
+
+**SSH config setup (one-time, on the admin machine):**
+
+The jump is configured via `~/.ssh/config` so that `ssh greencart-db` works directly without any extra flags:
+
+```
+Host greencart-app1
+    HostName <APP_INSTANCE_1_IP>
+    User ec2-user
+    IdentityFile ~/.ssh/greencart-key
+
+Host greencart-db
+    HostName <MONGO_PRIVATE_IP>
+    User ec2-user
+    IdentityFile ~/.ssh/greencart-key
+    ProxyJump greencart-app1
+```
+
+`ProxyJump` with explicit `IdentityFile` on each host block ensures the correct key is used for both hops. This is required because the SSH `-i` flag on the command line only applies to the final destination — not to the jump host.
 
 This pattern gives the admin full shell access to the MongoDB EC2, including the ability to run `docker exec` into the MongoDB container for direct database operations.
 
@@ -470,7 +496,7 @@ SSH on the application EC2 instances is open to `0.0.0.0/0`. Security is provide
 
 This decision was made because GitHub Actions runners have dynamic, unpredictable IP addresses. Restricting by IP would require either whitelisting the entire GitHub Actions IP range (large and frequently updated) or dynamically updating the security group before each deploy, both of which add unnecessary complexity.
 
-The `var.admin_cidr` variable is still accepted by the `security_groups` module but is no longer used for the SSH rule. It remains in the variable definition for compatibility with the `build-infra.sh` script.
+The `admin_cidr` variable has been removed entirely from Terraform and from `build-infra.sh` — it is no longer needed.
 
 
 ### SSH Key Pair Notes:
@@ -547,15 +573,16 @@ The project uses two shell scripts for full lifecycle management. Running either
 **`build-infra.sh` — full provisioning from scratch:**
 1. Runs `terraform apply` in `bootstrap/` — creates S3 bucket and DynamoDB table
 2. Runs `terraform init` in `terraform/` — initializes with the S3 backend
-3. Auto-detects current admin IP via `curl -s ifconfig.me`
-4. Reads SSH public key from `~/.ssh/greencart-key.pub`
-5. Runs `terraform apply` in `terraform/` — provisions all AWS infrastructure
-6. Reads Terraform outputs (Elastic IPs of both application EC2 instances)
-7. Sets the following GitHub Actions secrets automatically via the `gh` CLI:
+3. Reads SSH public key from `~/.ssh/greencart-key.pub`
+4. Runs `terraform apply` in `terraform/` — provisions all AWS infrastructure
+5. Reads Terraform outputs (Elastic IPs of both application EC2 instances)
+6. Sets the following GitHub Actions secrets automatically via the `gh` CLI:
    - `EC2_APP_IP_1` and `EC2_APP_IP_2` — Elastic IPs from Terraform outputs
    - `MONGO_URL` — MongoDB connection string from Terraform outputs
    - `EC2_SSH_PRIVATE_KEY` — private key read from `~/.ssh/greencart-key`
    - `AWS_ROLE_ARN` — GitHub Actions IAM role ARN from Terraform outputs
+7. Waits for both app EC2 instances to pass AWS status checks (ensures Docker is installed from `user_data` before CI tries to SSH in)
+8. Triggers the CI/CD `workflow_dispatch` workflow via `gh workflow run` and streams the live deployment output — the application is fully deployed when the script completes. No manual `push` to `main` is required.
 
 **`destroy-infra.sh` — full teardown to zero:**
 1. Runs `terraform destroy` in `terraform/` — tears down all main infrastructure (state is still readable from S3 at this point)
@@ -619,3 +646,4 @@ The goal of this order is to avoid any situation where infrastructure is built o
 
 ### Left to do:
 - **Phase 5:** Write the README.
+- check if there is a secrets in the files in GitHub repo in previuse commits or right now, to reduce the options check in the files that are in .gitignore file and still in previuse commits.  additionaly if there is a sequrity problems in my project, compare to a !!Demo project!!, This mean if there is a problems that can effect me in other repos also, such as exposed token or connection to my AWS and GitHub accounts.

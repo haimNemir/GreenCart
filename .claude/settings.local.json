@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\" http://greencart-alb-636309453.us-east-1.elb.amazonaws.com/health)",
+      "Read(//tmp/**)",
+      "Bash(wsl bash *)",
+      "PowerShell(wsl bash -c \"cd /home/haim/projects/GreenCart && bash scripts/destroy-infra.sh\" 2>&1)"
+    ]
+  }
+}
