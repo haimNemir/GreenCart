@@ -144,9 +144,24 @@ main() {
   terraform_destroy "$BOOTSTRAP_DIR" "bootstrap" || exit 1
 
   log "Destroy finished successfully."
-  log "The AWS account is back to its initial state. Run build-infra.sh to provision from scratch."
+  printf '\n================================================\n'
+  printf ' GreenCart infrastructure destroyed\n'
+  printf '================================================\n'
+  printf ' Destroyed:\n'
+  printf '   - 2x App EC2 instances + Elastic IPs\n'
+  printf '   - 1x MongoDB EC2 instance\n'
+  printf '   - Application Load Balancer + Target Group\n'
+  printf '   - VPC, subnets, IGW, NAT Gateway, route tables\n'
+  printf '   - Security groups (ALB, app, DB)\n'
+  printf '   - ECR repositories (backend + frontend)\n'
+  printf '   - IAM roles, policies, OIDC provider\n'
+  printf '   - EC2 key pair\n'
+  printf '   - S3 state bucket + DynamoDB lock table\n'
+  printf ' AWS account is back to its initial state.\n'
+  printf ' Run build-infra.sh to provision from scratch.\n'
+  printf '================================================\n\n'
 
-  printf '\nSummary:\n'
+  printf 'Summary:\n'
   printf '%s\n' "${SUMMARY_LINES[@]}"
 }
 

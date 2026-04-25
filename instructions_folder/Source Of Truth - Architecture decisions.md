@@ -599,10 +599,34 @@ After `destroy-infra.sh` completes, the AWS account is in exactly the same state
 
 Token configuration:
 - **Scope:** GreenCart repository only
-- **Permission:** Repository secrets — Read and write (no other permissions)
+- **Permissions:**
+  - Repository secrets — Read and write (required for `gh secret set`)
+  - Actions — Read and write (required for `gh workflow run` to trigger `workflow_dispatch`)
 - **Expires:** Tue, Jun 23 2026
 
+Both permissions are required. The original token had only "Repository secrets", which caused `build-infra.sh` to fail at the last step with HTTP 403 when trying to trigger the CI/CD workflow dispatch.
+
 To authenticate: `echo "<token>" | gh auth login --with-token` (run inside WSL)
+
+
+### WSL2 Clock Drift Notes:
+WSL2 does not have its own RTC and relies on the Windows hardware clock. After the host machine sleeps or hibernates, WSL2's internal clock can drift significantly behind real time. AWS rejects any API request whose signature timestamp is more than 300 seconds old, causing `terraform apply` to fail mid-run with:
+- `Signature expired: ... is now earlier than ...`
+- `AuthFailure: AWS was not able to validate the provided access credentials`
+
+These errors can appear deep into a `terraform apply` after resources have already been partially created, making them harder to debug than an upfront failure.
+
+**Mitigations in place:**
+
+1. **`build-infra.sh` clock check** — the script fetches the current time from AWS via an HTTPS response header and compares it to the local clock before doing anything. If the drift exceeds 240 seconds (a 60-second safety margin before AWS's 300-second hard limit), the script exits immediately with a clear message instead of failing inside `terraform apply`.
+
+2. **`systemd-timesyncd` (automatic)** — the WSL environment has `systemd=true` in `/etc/wsl.conf` and `systemd-timesyncd` active. This re-syncs the clock automatically after wake from sleep.
+
+**Manual fix if the clock is still drifted:**
+```bash
+sudo hwclock --hctosys
+```
+This syncs the WSL clock from the Windows hardware clock instantly. Then re-run `build-infra.sh` — Terraform will detect what was already created and continue from where it left off.
 
 
 ### Architecture Flow:

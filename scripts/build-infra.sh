@@ -46,6 +46,52 @@ require_command() {
   fi
 }
 
+# WSL2 does not have its own RTC and relies on the Windows hardware clock. After the host
+# machine sleeps or hibernates, WSL2's internal clock can drift significantly behind real
+# time. AWS rejects any API request whose signature timestamp is more than 300 seconds old,
+# causing Terraform to fail mid-apply with "Signature expired" or "AuthFailure" errors —
+# potentially after resources have already been partially created.
+#
+# This function fetches the current time from AWS (via the Date header of any HTTPS response)
+# and compares it to the local clock. If the drift exceeds 240 seconds (a 60-second safety
+# margin before AWS's 300-second limit), the script exits immediately with a clear message
+# instead of failing deep inside a terraform apply.
+#
+# Fix: run 'sudo hwclock --hctosys' to sync the WSL clock from the Windows hardware clock,
+# then re-run this script. To prevent the issue permanently, add 'command = hwclock --hctosys'
+# under [boot] in /etc/wsl.conf.
+check_clock_drift() {
+  local max_drift=240
+  local aws_date aws_epoch local_epoch drift
+
+  aws_date=$(curl -sI --max-time 5 https://aws.amazon.com 2>/dev/null \
+    | grep -i '^date:' | sed 's/[Dd]ate: //' | tr -d '\r')
+
+  if [[ -z "$aws_date" ]]; then
+    log "WARNING: Could not reach AWS to check clock drift — skipping check"
+    return 0
+  fi
+
+  aws_epoch=$(date -u -d "$aws_date" +%s 2>/dev/null)
+  local_epoch=$(date -u +%s)
+
+  if [[ -z "$aws_epoch" ]]; then
+    log "WARNING: Could not parse AWS Date header — skipping check"
+    return 0
+  fi
+
+  drift=$(( local_epoch - aws_epoch ))
+  drift="${drift#-}" # absolute value
+
+  if (( drift > max_drift )); then
+    log "ERROR: System clock is ${drift}s off from AWS time (limit: ${max_drift}s)."
+    log "Fix: run 'sudo hwclock --hctosys' to sync the WSL clock, then retry."
+    exit 1
+  fi
+
+  log "OK: Clock drift check passed (${drift}s off from AWS time)"
+}
+
 run_cmd() {
   local description="$1"
   shift
@@ -109,6 +155,7 @@ main() {
 
   log "Build started. Log file: $LOG_FILE"
 
+  check_clock_drift || exit 1
   run_cmd "Validate AWS credentials" aws sts get-caller-identity --region "$AWS_REGION" || exit 1
 
   # Step 1: Provision the state backend (S3 bucket + DynamoDB table).
@@ -194,9 +241,16 @@ main() {
     exit 1
   fi
 
-  log "Build finished successfully. Application is live at: http://${alb_dns}"
+  log "Build finished successfully."
+  printf '\n================================================\n'
+  printf ' GreenCart is live!\n'
+  printf '================================================\n'
+  printf ' Load-balanced URL (use this):  http://%s\n' "$alb_dns"
+  printf ' App instance 1 (direct):       http://%s\n' "$ip1"
+  printf ' App instance 2 (direct):       http://%s\n' "$ip2"
+  printf '================================================\n\n'
 
-  printf '\nSummary:\n'
+  printf 'Summary:\n'
   printf '%s\n' "${SUMMARY_LINES[@]}"
 }
 
