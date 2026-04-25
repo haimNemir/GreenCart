@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\" http://greencart-alb-636309453.us-east-1.elb.amazonaws.com/api/items)"
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\" http://greencart-alb-636309453.us-east-1.elb.amazonaws.com/api/items)",
+      "Bash(aws elbv2 *)"
     ]
   }
 }

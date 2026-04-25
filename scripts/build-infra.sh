@@ -153,8 +153,48 @@ main() {
   run_cmd "Set AWS_ROLE_ARN secret" \
     gh secret set AWS_ROLE_ARN --repo "$GITHUB_REPO" --body "$role_arn" || exit 1
 
-  log "Build finished successfully."
-  log "Application will be available at: http://${alb_dns}"
+  # Step 6: Wait for the app EC2 instances to pass status checks before triggering CI.
+  # user_data installs Docker on first boot — the deploy SSH step will fail if it runs
+  # before Docker is ready on the instance.
+  local instance_ids
+  instance_ids=$(aws ec2 describe-instances \
+    --region "$AWS_REGION" \
+    --filters \
+      "Name=tag:Project,Values=greencart" \
+      "Name=tag:Name,Values=greencart-app-*" \
+      "Name=instance-state-name,Values=running" \
+    --query "Reservations[].Instances[].InstanceId" \
+    --output text)
+
+  run_cmd "Wait for app instances to pass EC2 status checks" \
+    aws ec2 wait instance-status-ok \
+      --region "$AWS_REGION" \
+      --instance-ids $instance_ids || exit 1
+
+  # Step 7: Trigger the CI/CD workflow to build images and deploy the application.
+  run_cmd "Trigger CI/CD workflow" \
+    gh workflow run ci.yml --repo "$GITHUB_REPO" --ref main || exit 1
+
+  sleep 5
+
+  local run_id
+  run_id=$(gh run list --repo "$GITHUB_REPO" --workflow ci.yml \
+    --limit 1 --json databaseId --jq '.[0].databaseId')
+
+  if [[ -z "$run_id" ]]; then
+    log "ERROR: Could not find the triggered workflow run"
+    exit 1
+  fi
+
+  log "CI/CD run $run_id started. Waiting for deployment to complete (this takes several minutes)..."
+  if gh run watch "$run_id" --repo "$GITHUB_REPO" --exit-status 2>&1 | tee -a "$LOG_FILE"; then
+    record_summary "OK: CI/CD deployment completed"
+  else
+    record_summary "ERROR: CI/CD deployment failed — run: gh run view $run_id --repo $GITHUB_REPO --log-failed"
+    exit 1
+  fi
+
+  log "Build finished successfully. Application is live at: http://${alb_dns}"
 
   printf '\nSummary:\n'
   printf '%s\n' "${SUMMARY_LINES[@]}"

@@ -40,6 +40,10 @@ resource "aws_instance" "db" {
     docker compose -f docker-compose.db.yml up -d
   EOF
 
+  lifecycle {
+    ignore_changes = [ami]
+  }
+
   tags = {
     Name    = "${var.name}-db"
     Project = var.name
