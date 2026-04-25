@@ -28,7 +28,14 @@
       "PowerShell(wsl --exec bash -c \"timedatectl status\")",
       "PowerShell(wsl --exec bash -c \"gh run view 24933231994 --repo haimNemir/GreenCart --log-failed 2>&1\")",
       "PowerShell(wsl --exec bash -c \"grep -n 'event_name' /mnt/c/Users/Haim/Documents/Projects/GreenCart/.github/workflows/ci.yml\")",
-      "PowerShell(wsl --exec bash -c \"cd /mnt/c/Users/Haim/Documents/Projects/GreenCart && git diff .github/workflows/ci.yml\")"
+      "PowerShell(wsl --exec bash -c \"cd /mnt/c/Users/Haim/Documents/Projects/GreenCart && git diff .github/workflows/ci.yml\")",
+      "Bash(grep -n '\\\\$[a-zA-Z_][a-zA-Z_0-9]*[^\"]' scripts/build-infra.sh scripts/destroy-infra.sh)",
+      "Bash(\" | head -40)",
+      "Bash(grep -v \"echo\\\\|printf\\\\|log\\\\|\\\\\\\\$\\(\" | head -40)",
+      "Bash(terraform -chdir=terraform validate)",
+      "Bash(aws s3 *)",
+      "Bash(aws ecr *)",
+      "Bash(terraform providers *)"
     ]
   }
 }

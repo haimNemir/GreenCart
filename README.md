@@ -69,6 +69,68 @@ GitHub Actions builds the images, pushes to ECR, and deploys to both EC2 instanc
 
 ---
 
+## Networking & Traffic Routing
+
+### Inbound request — user to app
+
+```
+User browser
+  ↓
+ALB (port 80, public) — single DNS entry, distributes across both app instances
+  ↓
+App EC2 (port 80) — security group accepts traffic from ALB SG only
+  ↓
+Docker bridge network (app-net from docker-compose)
+  ↓
+frontend container — Nginx listening on port 80
+  ├── location /        → serves static React build from /usr/share/nginx/html
+  ├── location /api/    → proxy_pass http://backend:3000  (Express)
+  └── location /health  → proxy_pass http://backend:3000/health (Express)
+```
+
+Nginx and Express communicate over the internal Docker bridge network (`app-net`) using the
+container name `backend` as the hostname — no port is exposed to the host for Express.
+
+---
+
+### App instances → DB
+
+```
+App EC2 (private IP, app-sg)
+  ↓
+VPC local route — all traffic within the VPC CIDR is routed internally, no gateway needed
+  ↓
+DB EC2 (private IP, db-sg) — security group accepts port 27017 from app-sg only
+  ↓
+MongoDB container (port 27017)
+```
+
+---
+
+### DB outbound — pulling Docker images from the internet
+
+The DB instance lives in a private subnet with no public IP. Outbound internet access is
+provided by the NAT Gateway.
+
+```
+DB instance (private IP e.g. 10.0.3.5)
+  ↓
+Private Route Table: 0.0.0.0/0 → NAT Gateway
+  ↓
+NAT Gateway: replaces source IP 10.0.3.5 with its Elastic IP (e.g. 54.x.x.x)
+  ↓
+Public Route Table: 0.0.0.0/0 → Internet Gateway
+  ↓
+IGW: maps the EIP to the NAT Gateway and forwards the packet out
+  ↓
+Internet (DockerHub / GitHub)
+```
+
+The return traffic follows the same path in reverse. The internet never initiates a connection
+to the DB — the NAT Gateway drops all unsolicited inbound packets.
+
+---
+
 ## SSH access
 
 Get the IPs from Terraform (run from `terraform/`): `terraform output`
