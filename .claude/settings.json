@@ -35,7 +35,9 @@
       "Bash(terraform -chdir=terraform validate)",
       "Bash(aws s3 *)",
       "Bash(aws ecr *)",
-      "Bash(terraform providers *)"
+      "Bash(terraform providers *)",
+      "Bash(git checkout *)",
+      "Read(//c/Users/Haim/Documents/Projects/Calculator/calculator/calculator/.github/workflows/**)"
     ]
   }
 }

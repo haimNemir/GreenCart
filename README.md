@@ -80,12 +80,12 @@ ALB (port 80, public) — single DNS entry, distributes across both app instance
   ↓
 App EC2 (port 80) — security group accepts traffic from ALB SG only
   ↓
-Docker bridge network (app-net from docker-compose)
+Docker port mapping (ports: "80:80") — host port 80 forwarded into the container
   ↓
 frontend container — Nginx listening on port 80
   ├── location /        → serves static React build from /usr/share/nginx/html
-  ├── location /api/    → proxy_pass http://backend:3000  (Express)
-  └── location /health  → proxy_pass http://backend:3000/health (Express)
+  ├── location /api/    → proxy_pass http://backend:3000  (via app-net bridge)
+  └── location /health  → proxy_pass http://backend:3000/health (via app-net bridge)
 ```
 
 Nginx and Express communicate over the internal Docker bridge network (`app-net`) using the
@@ -148,6 +148,8 @@ Host greencart-app2
     User ec2-user
     IdentityFile ~/.ssh/greencart-key
 
+# The DB is in a private subnet — its security group accepts SSH only from the
+# app security group. ProxyJump through an app instance is the only way in.
 Host greencart-db
     HostName <MONGO_PRIVATE_IP>
     User ec2-user

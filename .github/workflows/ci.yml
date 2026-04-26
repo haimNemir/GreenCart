@@ -2,47 +2,47 @@ name: CI/CD
 
 # Triggers:
 # - workflow_dispatch:    triggered manually or by build-infra.sh after provisioning from scratch.
-# - pull_request to main: runs build + smoke tests only (no ECR push, no deploy).
+# - pull_request to main: runs build + smoke tests.
 # - push to main:         runs build + smoke tests + ECR push + rolling deploy to both EC2 instances.
 # - push of a v*.*.* tag: runs build + smoke tests + ECR push with a version tag (no deploy).
 
-on:
+on: # The trigger for this workflow the CI will listen to.
   workflow_dispatch:
-  pull_request:
+  pull_request: # To verify that the new code in the PR doesn't break the code in main. The workflow will run after a PR to main.
     branches: ["main"]
-  push:
+  push: # After a PR is merged to main, this is why its called push.
     branches: ["main"]
-    tags: ["v*.*.*"]
+    tags: ["v*.*.*"] # If the tag will start with "v" and with this format then the workflow will run.
 
 jobs:
   build-and-test:
     name: Build, test, and push images
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      id-token: write # Required for OIDC authentication with AWS.
+      contents: read # Allows to GITHUB_TOKEN to read the repository contents, which is necessary for actions/checkout to work.
+      id-token: write # Here we allow the GITHUB_TOKEN to create an OIDC token, which is necessary for the GitHub Actions to authenticate with AWS and push the images to ECR without needing to store AWS credentials in GitHub Secrets.
 
     steps:
-      - name: Checkout 
-        uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4 # This action checks out the repository code (and clone to the runner) so that the workflow can access it, and build the images to run the tests.
 
       - name: Compute image tags
         shell: bash
         run: |
-          set -euo pipefail
+          set -euo pipefail                                     # This makes the script to fail if any command fails, if there is an undefined variable, or if any command in a pipeline fails.
 
-          SHORT_SHA="${GITHUB_SHA::7}"
-          echo "SHORT_SHA=${SHORT_SHA}" >> "$GITHUB_ENV"
+          SHORT_SHA="${GITHUB_SHA::7}"                          # GITHUB_SHA - return the full commit HASH, and the syntax of "::7" return only the first 7 chars, which is enough to uniquely identify the commit.
+          echo "SHORT_SHA=${SHORT_SHA}" >> "$GITHUB_ENV"        # GITHUB_ENV is a special file of GitHub Actions that allows to set environment variables that will be available in the next steps of the workflow (but not in the other Runners/Jobs). Here we set the SHORT_SHA variable to be used in the next steps.
 
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"   # Strip the leading "v": "v1.2.3" → "1.2.3"
-            echo "IS_RELEASE=true"    >> "$GITHUB_ENV"
-            echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then        # GITHUB_REF - Holds the full reference of the branch or tag that triggered the workflow. for example, if the push is from main branch the the value will be "refs/heads/main", and if the push is from feature branch the value will be "refs/heads/feature-branch", and if the push is from a tag the value will be "refs/tags/v1.0.0". Here we check if the GITHUB_REF starts with "refs/tags/v", which means that the push is from a release tag.
+            VERSION="${GITHUB_REF_NAME#v}"                      # GITHUB_REF_NAME - Here is holds the short name of the tag such as "v1.0.0", and the syntax of "#v" means to remove the leading "v" from the tag name, so we get only "1.0.0" as the version number.
+            echo "IS_RELEASE=true"    >> "$GITHUB_ENV"          # We set the IS_RELEASE variable to true, for the next steps.
+            echo "VERSION=${VERSION}" >> "$GITHUB_ENV"          # We set the VERSION as the version number that we extracted from the tag name, for the next steps.
           else
             echo "IS_RELEASE=false" >> "$GITHUB_ENV"
           fi
 
-      - name: Show computed tags
+      - name: Show computed tags # This step is for debugging purposes, to show the computed variables that we set in the previous steps. So if there is an issue with the workflow we can easily identify it by looking at the logs of this step.
         shell: bash
         run: |
           echo "GITHUB_REF=${GITHUB_REF}"
@@ -56,18 +56,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Result name of the build = "greencart-backend:sha-abcd123".
           docker build -t greencart-backend:sha-${SHORT_SHA} ./backend
           if [[ "${IS_RELEASE}" == "true" ]]; then
-            docker tag greencart-backend:sha-${SHORT_SHA} greencart-backend:${VERSION}
+            docker tag greencart-backend:sha-${SHORT_SHA} greencart-backend:${VERSION}  # If this is a release tag push, we also tag the image with the version number, so we can easily identify it later. Result = greencart-backend:1.0.0 . The format of docker tag is: "docker tag SOURCE_IMAGE[:TAG] TARGET_IMAGE[:TAG]".
           fi
 
       - name: Build frontend image
         shell: bash
         run: |
           set -euo pipefail
+          # Result name of the build = greencart-frontend:sha-abcdefg .
           docker build -t greencart-frontend:sha-${SHORT_SHA} ./frontend
           if [[ "${IS_RELEASE}" == "true" ]]; then
-            docker tag greencart-frontend:sha-${SHORT_SHA} greencart-frontend:${VERSION}
+            docker tag greencart-frontend:sha-${SHORT_SHA} greencart-frontend:${VERSION}  # If this is a release tag push, we also tag the image with the version number, so we can easily identify it later. Result = greencart-frontend:1.0.0 . The format of docker tag is: "docker tag SOURCE_IMAGE[:TAG] TARGET_IMAGE[:TAG]".
           fi
 
       # The backend requires a live MongoDB connection to start — it calls process.exit(1)
@@ -78,8 +80,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          docker network create ci-net
-
+          docker network create ci-net        # Create a Docker network that includes backend and MongoDB.
+          # --rm - Auto delete the container when stopped. -d: detach mode.
+          # "-e MONGO_INITDB_DATABASE=greencart" - tells the MongoDB to create a database "greencart" when it starts. 
+          # GITHUB_WORKSPACE - contains the path of the cloned repository in the runner and it looks like "/home/runner/work/greencart/greencart". This line mounts the init.js script (our seed script) from his location to the "/docker-entrypoint-initdb.d/init.js" in the MongoDB container, which is the default location that MongoDB looks for initialization scripts.  ro: means read-only. 
           docker run --rm -d \
             --name mongodb-ci \
             --network ci-net \
@@ -87,6 +91,8 @@ jobs:
             -v "$GITHUB_WORKSPACE/mongo/init.js:/docker-entrypoint-initdb.d/init.js:ro" \
             mongo:7.0
 
+          # "-e MONGO_URL=mongodb://mongodb-ci:27017" - Define here the URL of MongoDB to connect with. mongodb:// - is a protocol such as "https://", this mean to conect with the MongoDB using the MongoDB protocol. mongodb-ci: is the hostname of the MongoDB container in the Docker network. 27017 - is the default port of MongoDB. 
+          # "-p 3000:3000" -Map the port 3000 of the host (runner) to the port 3000 of the container, "Express" backend listens on port 3000. 
           docker run --rm -d \
             --name backend-ci \
             --network ci-net \
@@ -95,18 +101,18 @@ jobs:
             greencart-backend:sha-${SHORT_SHA}
 
           for i in $(seq 1 30); do
-            if curl -fsS http://localhost:3000/health > /dev/null; then
+            if curl -fsS http://localhost:3000/health > /dev/null; then  # curl -fsS: make the curl command silent and fail on HTTP errors.
               echo "Backend is healthy"
-              docker rm -f backend-ci mongodb-ci > /dev/null 2>&1 || true
+              docker rm -f backend-ci mongodb-ci > /dev/null 2>&1 || true  # -f: force stop and remove the container, right after the test.
               docker network rm ci-net > /dev/null 2>&1 || true
-              exit 0
+              exit 0                                                        # exit from the script with success status.
             fi
             echo "Waiting for backend... ($i/30)"
             sleep 2
           done
 
           echo "Backend did not become healthy"
-          docker logs backend-ci || true
+          docker logs backend-ci || true               # print the logs of the container to the stdout of GitHub Actions Runner.
           docker rm -f backend-ci mongodb-ci > /dev/null 2>&1 || true
           docker network rm ci-net > /dev/null 2>&1 || true
           exit 1
@@ -117,7 +123,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
+          
+          # "--add-host backend:127.0.0.1" - Create a fake host entry with name "backend" that points to localhost. This is because right now the only container that is running is the frontend, and if the frontend tries to connect to the backend using the hostname "backend" such what we define in nginx.conf (proxy_pass http://backend:3000;) it will be crash because there is no container with this name. Aon one more important thing to understand is that when the container with the nginx is start the nginx will try to resolve every hostname in the nginx.conf file, and if it failed to resolve any hostname it will be crash. So by adding this line we make the nginx to resolve the "backend" hostname to localhost.
+          # "-p 8080:80" - Map the port 8080 of the host (runner) to the port 80 of the container, where nginx listens.
           docker run --rm -d \
             --name frontend-ci \
             --add-host backend:127.0.0.1 \
@@ -125,60 +133,74 @@ jobs:
             greencart-frontend:sha-${SHORT_SHA}
 
           for i in $(seq 1 30); do
-            if curl -fsS http://localhost:8080/ > /dev/null; then
+            if curl -fsS http://localhost:8080/ > /dev/null; then  # curl -fsS: make the curl command silent and fail on HTTP errors.
               echo "Frontend is serving"
-              docker rm -f frontend-ci > /dev/null 2>&1 || true
-              exit 0
+              docker rm -f frontend-ci > /dev/null 2>&1 || true  # -f: force stop and remove the container, right after the test.
+              exit 0                                              # exit from the script with success status.
             fi
             echo "Waiting for frontend... ($i/30)"
             sleep 2
           done
 
           echo "Frontend did not become healthy"
-          docker logs frontend-ci || true
+          docker logs frontend-ci || true               # print the logs of the container to the stdout of GitHub Actions Runner.
           docker rm -f frontend-ci > /dev/null 2>&1 || true
           exit 1
 
       - name: Configure AWS credentials (OIDC)
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        uses: aws-actions/configure-aws-credentials@v4
+        
+        # Here we do five steps: 
+        # 1) Ask from GitHub OIDC token. 
+        # 2) The "action" sends this token to AWS STS service. 
+        # 3) AWS returns temporary credentials (Access Key + Secret Key + Session Token) — valid for ~1 hour
+        # 4) The action writes them as environment variables on the Runner (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN) 
+        # 5) All subsequent steps like aws ecr get-login-password, aws sts get-caller-identity find them automatically
+        uses: aws-actions/configure-aws-credentials@v4 
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}   # AWS_ROLE_ARN - Holds the ARN of the AWS IAM Role that we created for GitHub OIDC. And we define it as a secret in GitHub Secrets with the script "build-infra.sh". And here we tell the action to assume this role to get the temporary credentials.
           aws-region: us-east-1
 
-      - name: Verify AWS identity
+      - name: Verify AWS identity   # To check the connection.
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        run: aws sts get-caller-identity
+        # This is a test step that check if the Runner is connnect to AWS with the correct permissions. We do it to check if 
+        # there is an errors in the the authentication with AWS before we start pushing the images to ECR.
+        # If the connection is not-working it will raise an error emmediately.
+        run: aws sts get-caller-identity        
 
-      - name: Compute ECR registry URL
+      - name: Compute ECR registry URL   # Save in GITHUB_ENV the variables of the backend/frontend URLs.
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -euo pipefail
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)      # Return only the AWS account ID like "123456789012". --query Account: return only the Account field from the response. --output text: return the output as plain clear text and not a JSON.  
           ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com"
           echo "ECR_REGISTRY=${ECR_REGISTRY}"                         >> "$GITHUB_ENV"
           echo "ECR_BACKEND=${ECR_REGISTRY}/greencart-backend"        >> "$GITHUB_ENV"
           echo "ECR_FRONTEND=${ECR_REGISTRY}/greencart-frontend"      >> "$GITHUB_ENV"
 
-      - name: Login to Amazon ECR
+      - name: Login to Amazon ECR     # Here we logging "Docker" to AWS so he will can push the images to ECR. Because the "Docker" is a platform of its own he need to be logged in to AWS separately from the GitHub Actions Runner.  
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
+          # "aws ecr get-login-password --region us-east-1" - Return a password that anyone can use to push images to ECR.
+          # "| docker login --username AWS --password-stdin "${ECR_REGISTRY}" - the pipe "|" - take the output of the previous command (get-login-password - the password) and pass it as an input to the next command (docker login). docker login - Here we logged in docker to the AWS using the username "AWS" (this is a hardcoded username that AWS requires when you login) and the password that we got from the previous command, ${ECR_REGISTRY} - is the URL of the ECR registry that we want to login to.
           aws ecr get-login-password --region us-east-1 \
             | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
 
-      - name: Push images to ECR
+      - name: Push images to ECR # Here we push to ECR the images. We also do this: "docker tag ... to ..." this is for aliac the name of the images from the oldest names to the name of the ECR registry + SHA. we do it because that by default "docker push" will push to Docker hub there for we define in the name itself the destination (domain of the registry) and docker will try to connect to this repo and he will check permissions and only after that he will push to our ECR.
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -euo pipefail
 
+          # Push SHA tags
           docker tag greencart-backend:sha-${SHORT_SHA}  "${ECR_BACKEND}:sha-${SHORT_SHA}"
           docker tag greencart-frontend:sha-${SHORT_SHA} "${ECR_FRONTEND}:sha-${SHORT_SHA}"
           docker push "${ECR_BACKEND}:sha-${SHORT_SHA}"
           docker push "${ECR_FRONTEND}:sha-${SHORT_SHA}"
 
+          # Push release tags (version) if this is a release tag push
           if [[ "${IS_RELEASE}" == "true" ]]; then
             docker tag greencart-backend:sha-${SHORT_SHA}  "${ECR_BACKEND}:${VERSION}"
             docker tag greencart-frontend:sha-${SHORT_SHA} "${ECR_FRONTEND}:${VERSION}"

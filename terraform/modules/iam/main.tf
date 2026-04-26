@@ -2,10 +2,14 @@ data "aws_caller_identity" "current" {} # Get the current AWS account ID
 
 # ---- GitHub OIDC Provider ----
 
+# Here we create an IAM OIDC provider for GitHub Actions. 
+# This tells AWS to trust JWTs issued by GitHub Actions as a valid identity provider of tokens.
 resource "aws_iam_openid_connect_provider" "github" {
-  url            = "https://token.actions.githubusercontent.com"
-  client_id_list = ["sts.amazonaws.com"]
-  thumbprint_list = [
+  url            = "https://token.actions.githubusercontent.com" # The identity provider's address (GitHub's OIDC endpoint).
+  # client_id_list - Who will receive the tokens — in this case, AWS STS, the service that check the tokens. 
+  client_id_list = ["sts.amazonaws.com"] 
+  # thumbprint_list - the SSL certificate fingerprints of GitHub.
+  thumbprint_list = [ 
     "6938fd4d98bab03faadb97b34396831e3780aea1",
     "1c58a3a8518e8759bf075b76b750d4f2df264fcd",
   ]
@@ -13,12 +17,13 @@ resource "aws_iam_openid_connect_provider" "github" {
 
 # ---- GitHub Actions IAM Role (ECR Push) ----
 
-data "aws_iam_policy_document" "github_assume_role" { # This data source creates locally a JSON document that defines the trust policy for the GitHub Actions IAM role below.
+# This data source creates locally a JSON document that defines the trust policy for the GitHub Actions IAM role below.
+data "aws_iam_policy_document" "github_assume_role" { 
   statement {
     effect  = "Allow"
     actions = ["sts:AssumeRoleWithWebIdentity"] # This policy allows the role to be assumed by a web identity such as a GitHub Actions token.
 
-    ## Allows the external GitHub identity to get access to AWS resources.
+    ## Allows an external identity to get access to AWS resources, in this case is GitHub Actions.  
     principals {                # Principals in IAM define who can assume the role. Here we specify a federated identity provider — the OIDC provider we created above for GitHub Actions.
       type        = "Federated" # Federated is the opposite of an internal AWS user or service. This means the principal is an external identity such as GitHub Actions.
       identifiers = [aws_iam_openid_connect_provider.github.arn]
@@ -30,7 +35,7 @@ data "aws_iam_policy_document" "github_assume_role" { # This data source creates
       variable = "token.actions.githubusercontent.com:aud" # This variable returns the "audience" claim in the OIDC token.
       values   = ["sts.amazonaws.com"]
     }
-    ## Check for repository and ref (branch or tag).
+    ## Allows for repository and ref (branch or tags) the workflow runs on.
     condition {
       test     = "StringLike"                              # "StringLike" allows regex, such as "refs/tags/v*" to match all tags starting with "v".
       variable = "token.actions.githubusercontent.com:sub" # Returns the "subject" claim in the OIDC token, containing the repository and ref that triggered the workflow.

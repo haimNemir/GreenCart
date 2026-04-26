@@ -11,7 +11,7 @@ services:
       context: ./backend
     container_name: greencart-backend
     environment:
-      - MONGO_URL=${MONGO_URL} # MONGO_URL - looks like that: "MONGO_URL=mongodb://db-server-elastic-ip:27017" And it came from the CI pipeline, and the CI knows it because the GitHub Actions secrets that we set in the GitHub repository, And we will know the value of the IP because is a elastic IP that we defined in the AWS.
+      - MONGO_URL=${MONGO_URL} # MONGO_URL - looks like: "mongodb://10.0.3.x:27017" (the DB's private IP). The DB lives in a private subnet with no public IP — the private IP is stable within the VPC and is read from Terraform output (mongo_private_ip) by build-infra.sh, which stores it as the MONGO_URL GitHub Actions secret.
     networks:
       - app-net
     restart: unless-stopped # This means that if the container stops for any reason, it will automatically restart unless it was stopped manually.
